@@ -488,29 +488,24 @@
             
             results.forEach(result => {
                 const row = tbody.insertRow();
-                let statusCodes = [];
+                let statusChain = [];
                 
-                // Add all statuses from redirect chain
+                // Build complete status chain including final status
                 if (result.redirect_chain && result.redirect_chain.length > 0) {
-                    result.redirect_chain.forEach((redirect, index) => {
-                        if (redirect.status) {
-                            statusCodes.push(redirect.status);
-                        }
-                        // Only add final status for the last redirect
-                        if (redirect.final_status && index === result.redirect_chain.length - 1) {
-                            statusCodes.push(redirect.final_status);
-                        }
-                    });
+                    statusChain = result.redirect_chain.map(r => r.status);
+                    if (result.redirect_chain[result.redirect_chain.length - 1].final_status) {
+                        statusChain.push(result.redirect_chain[result.redirect_chain.length - 1].final_status);
+                    }
+                } else if (result.initial_status) {
+                    statusChain = [result.initial_status];
                 }
-                
-                const redirectCount = result.redirect_chain ? result.redirect_chain.length : 0;
                 
                 // Create cells with proper URL data
                 const cells = [
-                    result.source_url || result.url || '',  // Use source_url first, fall back to url
-                    result.target_url || result.final_url || '', // Use target_url first, fall back to final_url
-                    statusCodes.join(' → '),
-                    redirectCount
+                    result.source_url || '',
+                    result.target_url || '',
+                    statusChain.join(' → '),
+                    result.redirect_chain ? result.redirect_chain.length : 0
                 ];
                 
                 cells.forEach(cellData => {

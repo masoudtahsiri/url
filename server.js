@@ -176,7 +176,7 @@ app.post('/api/check-urls', upload.single('urls'), async (req, res) => {
       const content = req.file.buffer.toString('utf8');
       urls = content.split('\n')
         .map(line => line.trim())
-        .filter(line => line && !line.startsWith('#'));
+        .filter((line, index) => line && !line.startsWith('#') && index > 0); // Skip header row
     }
     
     // Handle URLs from form data
@@ -211,14 +211,27 @@ app.post('/api/check-urls', upload.single('urls'), async (req, res) => {
 
     // Generate CSV content
     const csvContent = [
-      ['Source URL', 'Target URL', 'Status Codes', 'Redirect Count', 'Error'].join(','),
-      ...results.map(result => [
-        result.source_url,
-        result.target_url,
-        result.redirect_chain.map(r => r.status).join(' → '),
-        result.redirect_chain.length,
-        result.error
-      ].map(field => `"${String(field).replace(/"/g, '""')}"`).join(','))
+      ['Source URL', 'Target URL', 'Status Code Chain', 'Redirect Count', 'Error'].join(','),
+      ...results.map(result => {
+        // Build complete status chain including final status
+        let statusChain = [];
+        if (result.redirect_chain && result.redirect_chain.length > 0) {
+          statusChain = result.redirect_chain.map(r => r.status);
+          if (result.redirect_chain[result.redirect_chain.length - 1].final_status) {
+            statusChain.push(result.redirect_chain[result.redirect_chain.length - 1].final_status);
+          }
+        } else if (result.initial_status) {
+          statusChain = [result.initial_status];
+        }
+        
+        return [
+          result.source_url,
+          result.target_url,
+          statusChain.join(' → '),
+          result.redirect_chain.length,
+          result.error
+        ].map(field => `"${String(field).replace(/"/g, '""')}"`).join(',');
+      })
     ].join('\n');
 
     // Send response
