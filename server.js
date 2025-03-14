@@ -42,7 +42,10 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Function to check URL redirects with proper error handling
 async function checkUrl(url) {
   return new Promise((resolve) => {
+    const originalUrl = url; // Store the original URL exactly as provided
     let currentUrl = url;
+    
+    // Only modify the URL for making the request, not for display
     if (!url.match(/^https?:\/\//i)) {
       currentUrl = 'http://' + url;
     }
