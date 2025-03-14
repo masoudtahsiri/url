@@ -150,7 +150,8 @@ async function checkUrl(url) {
             }
             resolve({
               source_url: originalUrl,
-              initial_status: redirectChain.length > 0 ? redirectChain[0].status : status,
+              initial_status: redirectChain.filter(r => !r.is_normalization).length > 0 ? 
+                redirectChain.find(r => !r.is_normalization).status : status,
               target_url: url,
               redirect_chain: redirectChain.filter(r => !r.is_normalization),
               error: ''
