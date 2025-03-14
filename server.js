@@ -68,8 +68,9 @@ async function checkUrl(url) {
         method: 'HEAD',
         timeout: 10000,
         headers: {
-          'User-Agent': 'URLChecker/1.0',
-          'Accept': '*/*'
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.9'
         }
       };
 
@@ -272,6 +273,14 @@ app.use((err, req, res, next) => {
     message: err.message
   });
 });
+
+// Start server if not being imported
+if (require.main === module) {
+  const port = process.env.PORT || 3001;
+  app.listen(port, () => {
+    console.log(`Server running on port ${port}`);
+  });
+}
 
 // Export for Vercel
 module.exports = app; 
