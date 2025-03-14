@@ -5,9 +5,9 @@
       "src": "server.js",
       "use": "@vercel/node",
       "config": {
-        "maxLambdaSize": "50mb",
-        "memory": 1024,
-        "maxDuration": 60
+        "maxLambdaSize": "10mb",
+        "memory": 512,
+        "maxDuration": 30
       }
     }
   ],
@@ -15,6 +15,11 @@
     {
       "src": "/api/check-urls",
       "methods": ["POST", "OPTIONS"],
+      "headers": {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type"
+      },
       "dest": "/server.js"
     },
     {
