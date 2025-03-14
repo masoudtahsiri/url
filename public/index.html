@@ -3,146 +3,667 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>URL Checker</title>
-    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <title>URL Redirect Checker</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" rel="stylesheet">
     <style>
-        .loading {
-            display: none;
+        :root {
+            --primary-color: #00A878;
+            --primary-hover: #046A38;
+            --bg-color: #002D26;
+            --card-bg: #FFFFFF;
+            --text-color: #1E293B;
+            --border-color: #E2E8F0;
+            --success-color: #00A878;
+            --warning-color: #F59E0B;
+            --error-color: #EF4444;
+            --scrollbar-color: #00A878;
+            --scrollbar-hover: #046A38;
         }
-        .loading.active {
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font-family: 'Inter', sans-serif;
+            color: var(--text-color);
+            background: var(--bg-color);
             display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .background-container {
+            width: 90%;
+            min-height: 90vh;
+            margin: 2rem auto;
+            background: linear-gradient(135deg, #002D26 0%, #007F3F 100%);
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 2rem;
+            border-radius: 1rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .background-container::before {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: repeating-linear-gradient(
+                135deg,
+                rgba(255, 255, 255, 0.05) 0px,
+                rgba(255, 255, 255, 0.05) 2px,
+                transparent 2px,
+                transparent 10px
+            );
+            pointer-events: none;
+            border-radius: 1rem;
+        }
+
+        .refact-title {
+            position: absolute;
+            top: 20px;
+            left: 30px;
+            font-size: 48px;
+            font-weight: bold;
+            letter-spacing: 2px;
+            color: white;
+            z-index: 1;
+        }
+
+        .container {
+            position: relative;
+            z-index: 1;
+            width: 100%;
+            max-width: 1200px;
+            margin: 4rem auto 0;
+        }
+
+        #alertContainer {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1050;
+            width: 100%;
+            max-width: 600px;
+            pointer-events: none;
+        }
+
+        #alertContainer .alert {
+            pointer-events: auto;
+            margin-bottom: 1rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            opacity: 0;
+            animation: slideIn 0.3s ease forwards;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateY(-20px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        .card {
+            background: var(--card-bg);
+            border-radius: 1rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            margin-bottom: 2rem;
+            position: relative;
+            z-index: 2;
+        }
+
+        .card:hover {
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            transform: translateY(-2px);
+        }
+
+        .card-header {
+            background: #046A38;
+            color: white;
+            border-radius: 1rem 1rem 0 0 !important;
+            padding: 1.5rem;
+            border: none;
+        }
+
+        .card-header h2 {
+            font-weight: 700;
+            font-size: 1.5rem;
+            margin: 0;
+            letter-spacing: -0.025em;
+        }
+
+        .card-body {
+            padding: 2rem;
+            border: 1px solid rgba(0, 168, 120, 0.2);
+            border-top: none;
+            border-radius: 0 0 1rem 1rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            background-color: rgba(255, 255, 255, 0.95);
+        }
+
+        .form-label {
+            font-weight: 600;
+            color: var(--text-color);
+            margin-bottom: 0.75rem;
+        }
+
+        .form-control {
+            border: 2px solid var(--border-color);
+            border-radius: 0.75rem;
+            padding: 0.75rem 1rem;
+            font-size: 1rem;
+            transition: all 0.2s ease;
+            background: #F8FAFC;
+        }
+
+        .form-control:focus {
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.1);
+        }
+
+        textarea.form-control {
+            min-height: 120px;
+            resize: vertical;
+        }
+
+        .btn {
+            padding: 0.75rem 1.5rem;
+            font-weight: 600;
+            border-radius: 0.75rem;
+            transition: all 0.2s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.025em;
+            font-size: 0.875rem;
+        }
+
+        .btn-primary {
+            background: #00A878;
+            border: none;
+            box-shadow: 0 4px 6px -1px rgba(0, 168, 120, 0.2);
+            color: #FFFFFF;
+        }
+
+        .btn-primary:hover {
+            background: #046A38;
+            transform: translateY(-1px);
+            box-shadow: 0 6px 8px -1px rgba(4, 106, 56, 0.3);
+            color: #FFFFFF;
+        }
+
+        .progress {
+            height: 0.75rem;
+            border-radius: 1rem;
+            background-color: #E2E8F0;
+            margin: 1.5rem 0;
+            overflow: hidden;
+        }
+
+        .progress-bar {
+            background: linear-gradient(135deg, #00A878, #046A38);
+            transition: width 0.3s ease;
+        }
+
+        .alert {
+            border: none;
+            border-radius: 0.75rem;
+            padding: 1rem 1.5rem;
+            margin-bottom: 1.5rem;
+            font-weight: 500;
+        }
+
+        .alert-success {
+            background: rgba(16, 185, 129, 0.1);
+            color: var(--success-color);
+        }
+
+        .alert-danger {
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--error-color);
+        }
+
+        .table {
+            margin: 0;
+        }
+
+        .table th {
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 0.75rem;
+            letter-spacing: 0.05em;
+            padding: 1rem;
+            background: #F1F5F9;
+            border-bottom: 2px solid var(--border-color);
+        }
+
+        .table td {
+            padding: 1rem;
+            vertical-align: middle;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .badge {
+            padding: 0.5rem 0.75rem;
+            font-weight: 600;
+            font-size: 0.75rem;
+            border-radius: 0.5rem;
+        }
+
+        .badge-success {
+            background: rgba(16, 185, 129, 0.1);
+            color: var(--success-color);
+        }
+
+        .badge-warning {
+            background: rgba(245, 158, 11, 0.1);
+            color: var(--warning-color);
+        }
+
+        .badge-danger {
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--error-color);
+        }
+
+        .results-section {
+            max-height: 500px;
+            overflow-y: auto;
+            border-radius: 0.75rem;
+            border: 2px solid var(--border-color);
+            margin-top: 1.5rem;
+        }
+
+        .results-section::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .results-section::-webkit-scrollbar-track {
+            background: #F1F5F9;
+            border-radius: 0.75rem;
+        }
+
+        .results-section::-webkit-scrollbar-thumb {
+            background: var(--scrollbar-color);
+            border-radius: 0.75rem;
+            transition: background-color 0.3s ease;
+        }
+
+        .results-section::-webkit-scrollbar-thumb:hover {
+            background: var(--scrollbar-hover);
+        }
+
+        .file-input-wrapper {
+            position: relative;
+            margin-bottom: 1.5rem;
+        }
+
+        .file-input-wrapper .form-control {
+            padding-right: 110px;
+        }
+
+        .or-divider {
+            text-align: center;
+            position: relative;
+            margin: 2rem 0;
+        }
+
+        .or-divider::before,
+        .or-divider::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            width: 45%;
+            height: 1px;
+            background: var(--border-color);
+        }
+
+        .or-divider::before {
+            left: 0;
+        }
+
+        .or-divider::after {
+            right: 0;
+        }
+
+        .or-divider span {
+            background: var(--card-bg);
+            padding: 0 1rem;
+            color: #64748B;
+            font-weight: 500;
+            text-transform: uppercase;
+            font-size: 0.875rem;
+        }
+
+        @media (max-width: 768px) {
+            .card-body {
+                padding: 1.5rem;
+            }
+
+            .btn {
+                width: 100%;
+                margin-bottom: 0.5rem;
+            }
+
+            .table {
+                font-size: 0.875rem;
+            }
         }
     </style>
 </head>
-<body class="bg-gray-100 min-h-screen">
-    <div class="container mx-auto px-4 py-8">
-        <h1 class="text-4xl font-bold text-center mb-8">URL Checker</h1>
-        
-        <div class="bg-white rounded-lg shadow-lg p-6 mb-8">
-            <div class="mb-6">
-                <h2 class="text-xl font-semibold mb-4">Upload CSV File</h2>
-                <input type="file" id="fileInput" accept=".csv" class="w-full p-2 border rounded">
-                <p class="text-sm text-gray-600 mt-2">First row will be treated as headers</p>
-            </div>
+<body>
+    <div class="background-container">
+        <div class="refact-title">REFACT</div>
+        <div class="container">
+            <div id="alertContainer"></div>
+            <div class="card">
+                <div class="card-header">
+                    <h2><i class="fas fa-link me-2"></i>URL Redirect Checker</h2>
+                </div>
+                <div class="card-body">
+                    <form id="urlForm">
+                        <div class="file-input-wrapper">
+                            <label class="form-label" for="csvFile">Upload CSV File</label>
+                            <input type="file" class="form-control" id="csvFile" accept=".csv">
+                        </div>
 
-            <div class="mb-6">
-                <h2 class="text-xl font-semibold mb-4">Or Enter URLs</h2>
-                <textarea id="urlsInput" rows="5" class="w-full p-2 border rounded" placeholder="Enter one URL per line"></textarea>
-            </div>
+                        <div class="or-divider">
+                            <span>or</span>
+                        </div>
 
-            <button id="checkButton" class="bg-blue-500 text-white px-6 py-2 rounded hover:bg-blue-600 transition-colors">
-                Check URLs
-            </button>
+                        <div class="mb-4">
+                            <label class="form-label" for="urls">Enter URLs (one per line)</label>
+                            <textarea class="form-control" id="urls" rows="5" placeholder="https://example.com/page1&#10;https://example.com/page2"></textarea>
+                            <small id="urlCount" class="form-text text-muted"></small>
+                        </div>
 
-            <div id="loading" class="loading items-center justify-center mt-4">
-                <svg class="animate-spin h-5 w-5 mr-3 text-blue-500" viewBox="0 0 24 24">
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                <span>Processing...</span>
-            </div>
-        </div>
+                        <div class="d-grid">
+                            <button type="submit" class="btn btn-primary" id="submitBtn">
+                                <i class="fas fa-search me-2"></i>Check URLs
+                            </button>
+                        </div>
+                    </form>
 
-        <div id="results" class="bg-white rounded-lg shadow-lg p-6 hidden">
-            <h2 class="text-xl font-semibold mb-4">Results</h2>
-            <div id="resultsTable" class="overflow-x-auto">
-                <table class="min-w-full table-auto">
-                    <thead>
-                        <tr class="bg-gray-100">
-                            <th class="px-4 py-2 text-left">Source URL</th>
-                            <th class="px-4 py-2 text-left">Target URL</th>
-                            <th class="px-4 py-2 text-left">Status Codes</th>
-                            <th class="px-4 py-2 text-left">Redirect Count</th>
-                        </tr>
-                    </thead>
-                    <tbody id="resultsBody"></tbody>
-                </table>
-            </div>
-            <div class="mt-4">
-                <button id="downloadCsv" class="bg-green-500 text-white px-6 py-2 rounded hover:bg-green-600 transition-colors">
-                    Download CSV
-                </button>
+                    <div id="progressSection" style="display: none;">
+                        <div class="progress">
+                            <div class="progress-bar" id="progressBar" role="progressbar" style="width: 0%"></div>
+                        </div>
+                        <p class="text-center text-muted">
+                            Processing: <span id="processedUrls">0</span> / <span id="totalUrls">0</span>
+                        </p>
+                    </div>
+
+                    <div id="resultsSection" class="results-section" style="display: none;">
+                        <table class="table" id="resultsTable">
+                            <thead>
+                                <tr>
+                                    <th>Original URL</th>
+                                    <th>Final URL</th>
+                                    <th>Status</th>
+                                    <th>Redirects</th>
+                                </tr>
+                            </thead>
+                            <tbody id="resultsBody"></tbody>
+                        </table>
+                    </div>
+                    
+                    <a href="#" id="downloadButton" class="btn btn-success mt-3" style="display: none;">
+                        <i class="fas fa-download me-2"></i>Download Results
+                    </a>
+                </div>
             </div>
         </div>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        const fileInput = document.getElementById('fileInput');
-        const urlsInput = document.getElementById('urlsInput');
-        const checkButton = document.getElementById('checkButton');
-        const loading = document.getElementById('loading');
-        const results = document.getElementById('results');
-        const resultsBody = document.getElementById('resultsBody');
-        const downloadCsv = document.getElementById('downloadCsv');
+        // Initialize all DOM elements
+        const form = document.getElementById('urlForm');
+        const submitBtn = document.getElementById('submitBtn');
+        const progressSection = document.getElementById('progressSection');
+        const progressBar = document.getElementById('progressBar');
+        const resultsSection = document.getElementById('resultsSection');
+        const processedUrls = document.getElementById('processedUrls');
+        const totalUrls = document.getElementById('totalUrls');
+        const downloadButton = document.getElementById('downloadButton');
+        const alertContainer = document.getElementById('alertContainer');
+        const urlCount = document.getElementById('urlCount');
+        const resultsTable = document.getElementById('resultsTable');
 
-        let csvData = null;
-
-        checkButton.addEventListener('click', async () => {
-            const formData = new FormData();
-            
-            if (fileInput.files.length > 0) {
-                formData.append('urls', fileInput.files[0]);
-            }
-            
-            if (urlsInput.value.trim()) {
-                formData.append('urls_text', urlsInput.value.trim());
-            }
-
-            if (!fileInput.files.length && !urlsInput.value.trim()) {
-                alert('Please provide URLs either through file upload or text input');
+        function showAlert(message, type) {
+            if (!alertContainer) {
+                console.error('Alert container not found');
                 return;
             }
+            // Remove any existing alerts
+            while (alertContainer.firstChild) {
+                alertContainer.removeChild(alertContainer.firstChild);
+            }
+            const alert = document.createElement('div');
+            alert.className = `alert alert-${type} alert-dismissible fade show`;
+            alert.innerHTML = `
+                ${message}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            `;
+            alertContainer.appendChild(alert);
+            setTimeout(() => {
+                if (alert && alert.parentNode) {
+                    alert.remove();
+                }
+            }, 5000);
+        }
 
-            loading.classList.add('active');
-            results.classList.add('hidden');
+        function updateProgress(current, total) {
+            if (!progressBar || !processedUrls || !totalUrls) {
+                console.error('Progress elements not found');
+                return;
+            }
+            const percentage = (current / total) * 100;
+            progressBar.style.width = `${percentage}%`;
+            processedUrls.textContent = current;
+            totalUrls.textContent = total;
+        }
+
+        function displayResults(results) {
+            if (!resultsTable) {
+                console.error('Results table not found');
+                return;
+            }
+            
+            const tbody = resultsTable.querySelector('tbody');
+            if (!tbody) {
+                console.error('Results table body not found');
+                return;
+            }
+            
+            tbody.innerHTML = '';
+            
+            results.forEach(result => {
+                const row = tbody.insertRow();
+                let statusCodes = [];
+                
+                // Add all statuses from redirect chain
+                if (result.redirect_chain && result.redirect_chain.length > 0) {
+                    result.redirect_chain.forEach((redirect, index) => {
+                        if (redirect.status) {
+                            statusCodes.push(redirect.status);
+                        }
+                        // Only add final status for the last redirect
+                        if (redirect.final_status && index === result.redirect_chain.length - 1) {
+                            statusCodes.push(redirect.final_status);
+                        }
+                    });
+                }
+                
+                const redirectCount = result.redirect_chain ? result.redirect_chain.length : 0;
+                
+                // Create cells with proper URL data
+                const cells = [
+                    result.source_url || result.url || '',  // Use source_url first, fall back to url
+                    result.target_url || result.final_url || '', // Use target_url first, fall back to final_url
+                    statusCodes.join(' → '),
+                    redirectCount
+                ];
+                
+                cells.forEach(cellData => {
+                    const cell = row.insertCell();
+                    cell.textContent = cellData;
+                });
+            });
+            
+            resultsSection.style.display = 'block';
+        }
+
+        function countUrls(text) {
+            return text.split('\n').filter(url => url.trim()).length;
+        }
+
+        // Only add the event listener if the element exists
+        const urlsTextarea = document.getElementById('urls');
+        if (urlsTextarea && urlCount) {
+            urlsTextarea.addEventListener('input', function(e) {
+                const count = countUrls(e.target.value);
+                urlCount.textContent = `You have entered ${count} URLs.`;
+                urlCount.className = 'form-text text-primary';
+            });
+        }
+
+        async function handleSubmit(event) {
+            event.preventDefault();
+            
+            const fileInput = document.getElementById('csvFile');
+            const urlsText = urlsTextarea ? urlsTextarea.value.trim() : '';
+            let urls = [];
+
+            showAlert('Processing URLs...', 'info');
+            if (progressSection) progressSection.style.display = 'block';
+            if (resultsSection) resultsSection.style.display = 'none';
+            if (submitBtn) submitBtn.disabled = true;
+            if (downloadButton) downloadButton.style.display = 'none';
+
+            if (fileInput && fileInput.files.length > 0) {
+                const formData = new FormData();
+                formData.append('urls', fileInput.files[0]);
+                
+                try {
+                    const response = await fetch('/api/check-urls', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    
+                    if (!response.ok) {
+                        const errorData = await response.json();
+                        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+                    }
+                    
+                    await handleResponse(response);
+                } catch (error) {
+                    console.error('Error:', error);
+                    showAlert(error.message || 'An error occurred while processing URLs', 'danger');
+                    if (submitBtn) submitBtn.disabled = false;
+                    if (progressSection) progressSection.style.display = 'none';
+                }
+                return;
+            }
+            
+            if (urlsText) {
+                urls = urlsText.split('\n').filter(url => url.trim());
+                updateProgress(0, urls.length);
+            }
+
+            if (urls.length === 0) {
+                showAlert('Please provide at least one URL to check', 'warning');
+                if (submitBtn) submitBtn.disabled = false;
+                if (progressSection) progressSection.style.display = 'none';
+                return;
+            }
 
             try {
                 const response = await fetch('/api/check-urls', {
                     method: 'POST',
-                    body: formData
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ urls })
                 });
-
-                const data = await response.json();
 
                 if (!response.ok) {
-                    throw new Error(data.error || 'Failed to process URLs');
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
                 }
 
-                csvData = data.csv;
-                resultsBody.innerHTML = '';
-
-                data.results.forEach(result => {
-                    const row = document.createElement('tr');
-                    row.innerHTML = `
-                        <td class="border px-4 py-2">${result.source_url}</td>
-                        <td class="border px-4 py-2">${result.target_url}</td>
-                        <td class="border px-4 py-2">${result.redirect_chain.map(r => r.status).join(' → ')}</td>
-                        <td class="border px-4 py-2">${result.redirect_chain.length}</td>
-                    `;
-                    resultsBody.appendChild(row);
-                });
-
-                results.classList.remove('hidden');
+                await handleResponse(response);
             } catch (error) {
-                alert(error.message);
+                console.error('Error:', error);
+                showAlert(error.message || 'An error occurred while processing URLs', 'danger');
             } finally {
-                loading.classList.remove('active');
+                if (submitBtn) submitBtn.disabled = false;
             }
-        });
+        }
 
-        downloadCsv.addEventListener('click', () => {
-            if (!csvData) return;
+        async function handleResponse(response) {
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let finalData = null;
+            let totalUrlCount = 0;
+            let firstProgressReceived = false;
 
-            const blob = new Blob([csvData], { type: 'text/csv' });
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `url_check_results_${Date.now()}.csv`;
-            document.body.appendChild(a);
-            a.click();
-            window.URL.revokeObjectURL(url);
-            document.body.removeChild(a);
-        });
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
+
+                for (const line of lines) {
+                    if (line.trim()) {
+                        try {
+                            const data = JSON.parse(line);
+                            if (data.progress) {
+                                if (!firstProgressReceived) {
+                                    firstProgressReceived = true;
+                                    totalUrlCount = data.progress.total;
+                                    updateProgress(0, totalUrlCount);
+                                }
+                                updateProgress(data.progress.current, data.progress.total);
+                                // Only show results when progress is complete
+                                if (data.progress.current === data.progress.total && data.results) {
+                                    displayResults(data.results);
+                                }
+                            }
+                            if (data.file) {
+                                finalData = data;
+                            }
+                        } catch (e) {
+                            console.error('Error parsing response:', e);
+                        }
+                    }
+                }
+            }
+
+            // Show download link if available
+            if (finalData && finalData.file && downloadButton) {
+                downloadButton.href = finalData.file;
+                downloadButton.style.display = 'block';
+            }
+
+            showAlert(`${totalUrlCount} URLs processed successfully!`, 'success');
+        }
+
+        // Only add the event listener if the form exists
+        if (form) {
+            form.addEventListener('submit', handleSubmit);
+        }
     </script>
 </body>
 </html> 
