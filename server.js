@@ -46,6 +46,7 @@ async function checkUrl(url) {
     let currentUrl = url;
     if (!url.match(/^https?:\/\//i)) {
       currentUrl = 'https://' + url;
+      originalUrl = 'https://' + url; // Also update originalUrl to include the prefix
     }
 
     const redirectChain = [];
