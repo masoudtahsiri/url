@@ -65,11 +65,23 @@ async function checkUrl(url) {
       }
 
       const options = {
-        method: 'HEAD',
+        method: 'GET',
         timeout: 10000,
         headers: {
-          'User-Agent': 'URLChecker/1.0',
-          'Accept': '*/*'
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Accept-Encoding': 'gzip, deflate, br',
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache',
+          'Sec-Ch-Ua': '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+          'Sec-Ch-Ua-Mobile': '?0',
+          'Sec-Ch-Ua-Platform': '"macOS"',
+          'Sec-Fetch-Dest': 'document',
+          'Sec-Fetch-Mode': 'navigate',
+          'Sec-Fetch-Site': 'none',
+          'Sec-Fetch-User': '?1',
+          'Upgrade-Insecure-Requests': '1'
         }
       };
 
@@ -78,50 +90,54 @@ async function checkUrl(url) {
           const status = res.statusCode;
           const location = res.headers.location;
 
-          if ([301, 302, 303, 307, 308].includes(status) && location && redirectCount < 10) {
-            redirectCount++;
-            redirectChain.push({
-              status: status,
-              url: location
-            });
+          // Consume the response data to properly end the request
+          res.on('data', () => {});
+          res.on('end', () => {
+            if ([301, 302, 303, 307, 308].includes(status) && location && redirectCount < 10) {
+              redirectCount++;
+              redirectChain.push({
+                status: status,
+                url: location
+              });
 
-            try {
-              const nextUrl = new URL(location, url).href;
-              currentUrl = nextUrl;
-              const nextProtocol = nextUrl.startsWith('https:') ? https : http;
-              makeRequest(nextUrl, nextProtocol);
-            } catch (error) {
-              resolve({
-                source_url: url,
-                initial_status: status,
-                target_url: currentUrl,
-                redirect_chain: [],
-                error: `Invalid redirect URL: ${error.message}`
-              });
-            }
-          } else {
-            // If there's no redirect (original URL equals final URL), don't include redirect chain
-            if (url === currentUrl) {
-              resolve({
-                source_url: url,
-                initial_status: status,
-                target_url: currentUrl,
-                redirect_chain: [],
-                error: ''
-              });
-            } else {
-              if (redirectChain.length > 0) {
-                redirectChain[redirectChain.length - 1].final_status = status;
+              try {
+                const nextUrl = new URL(location, url).href;
+                currentUrl = nextUrl;
+                const nextProtocol = nextUrl.startsWith('https:') ? https : http;
+                makeRequest(nextUrl, nextProtocol);
+              } catch (error) {
+                resolve({
+                  source_url: url,
+                  initial_status: status,
+                  target_url: currentUrl,
+                  redirect_chain: [],
+                  error: `Invalid redirect URL: ${error.message}`
+                });
               }
-              resolve({
-                source_url: url,
-                initial_status: redirectChain.length > 0 ? redirectChain[0].status : status,
-                target_url: currentUrl,
-                redirect_chain: redirectChain,
-                error: ''
-              });
+            } else {
+              // If there's no redirect (original URL equals final URL), don't include redirect chain
+              if (url === currentUrl) {
+                resolve({
+                  source_url: url,
+                  initial_status: status,
+                  target_url: currentUrl,
+                  redirect_chain: [],
+                  error: ''
+                });
+              } else {
+                if (redirectChain.length > 0) {
+                  redirectChain[redirectChain.length - 1].final_status = status;
+                }
+                resolve({
+                  source_url: url,
+                  initial_status: redirectChain.length > 0 ? redirectChain[0].status : status,
+                  target_url: currentUrl,
+                  redirect_chain: redirectChain,
+                  error: ''
+                });
+              }
             }
-          }
+          });
         });
 
         req.on('error', (error) => {
