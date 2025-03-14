@@ -25,7 +25,11 @@ const upload = multer({
 });
 
 // Enable CORS and compression with proper options
-app.use(cors());
+app.use(cors({
+  origin: '*',
+  methods: ['POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type']
+}));
 app.use(compression());
 
 // Configure body-parser with limits
@@ -54,7 +58,7 @@ async function checkUrl(url) {
           source_url: url,
           initial_status: 0,
           target_url: url,
-          redirect_chain: [],
+          redirect_chain: redirectChain,
           error: 'Request timeout after 30 seconds'
         });
         return;
@@ -64,9 +68,8 @@ async function checkUrl(url) {
         method: 'HEAD',
         timeout: 10000,
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.9'
+          'User-Agent': 'URLChecker/1.0',
+          'Accept': '*/*'
         }
       };
 
@@ -97,7 +100,9 @@ async function checkUrl(url) {
               });
             }
           } else {
-            // Only include initial_status if there were redirects
+            if (redirectChain.length > 0) {
+              redirectChain[redirectChain.length - 1].final_status = status;
+            }
             resolve({
               source_url: url,
               initial_status: redirectChain.length > 0 ? redirectChain[0].status : status,
@@ -105,11 +110,6 @@ async function checkUrl(url) {
               redirect_chain: redirectChain,
               error: ''
             });
-
-            // If there were redirects, add the final status to the last redirect
-            if (redirectChain.length > 0) {
-              redirectChain[redirectChain.length - 1].final_status = status;
-            }
           }
         });
 
@@ -118,7 +118,7 @@ async function checkUrl(url) {
             source_url: url,
             initial_status: 0,
             target_url: url,
-            redirect_chain: [],
+            redirect_chain: redirectChain,
             error: error.message
           });
         });
@@ -129,7 +129,7 @@ async function checkUrl(url) {
             source_url: url,
             initial_status: 0,
             target_url: url,
-            redirect_chain: [],
+            redirect_chain: redirectChain,
             error: 'Request timed out'
           });
         });
@@ -140,7 +140,7 @@ async function checkUrl(url) {
           source_url: url,
           initial_status: 0,
           target_url: url,
-          redirect_chain: [],
+          redirect_chain: redirectChain,
           error: `Request failed: ${error.message}`
         });
       }

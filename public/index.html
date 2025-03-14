@@ -490,42 +490,27 @@
                 const row = tbody.insertRow();
                 let statusChain = [];
                 
-                // Build status chain only if there are redirects
+                // Build complete status chain including final status
                 if (result.redirect_chain && result.redirect_chain.length > 0) {
                     statusChain = result.redirect_chain.map(r => r.status);
                     if (result.redirect_chain[result.redirect_chain.length - 1].final_status) {
                         statusChain.push(result.redirect_chain[result.redirect_chain.length - 1].final_status);
                     }
-                } else {
-                    // If no redirects, just show the status code
+                } else if (result.initial_status) {
                     statusChain = [result.initial_status];
                 }
                 
                 // Create cells with proper URL data
                 const cells = [
                     result.source_url || '',
-                    result.target_url || result.source_url || '', // Use source_url if target_url is not available
+                    result.target_url || '',
                     statusChain.join(' → '),
                     result.redirect_chain ? result.redirect_chain.length : 0
                 ];
                 
-                cells.forEach((cellData, index) => {
+                cells.forEach(cellData => {
                     const cell = row.insertCell();
                     cell.textContent = cellData;
-                    
-                    // Add color coding for status codes
-                    if (index === 2) { // Status column
-                        const statuses = cellData.split(' → ').map(s => parseInt(s));
-                        const lastStatus = statuses[statuses.length - 1];
-                        
-                        if (lastStatus >= 200 && lastStatus < 300) {
-                            cell.style.color = 'var(--success-color)';
-                        } else if (lastStatus >= 300 && lastStatus < 400) {
-                            cell.style.color = 'var(--warning-color)';
-                        } else if (lastStatus >= 400) {
-                            cell.style.color = 'var(--error-color)';
-                        }
-                    }
                 });
             });
             
