@@ -20,11 +20,5 @@
   "env": {
     "NODE_ENV": "production",
     "VERCEL": "true"
-  },
-  "functions": {
-    "api/check-urls": {
-      "memory": 1024,
-      "maxDuration": 60
-    }
   }
 }
