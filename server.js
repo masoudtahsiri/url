@@ -35,12 +35,25 @@ app.use(express.static(path.join(__dirname, 'public')));
 async function checkUrl(url) {
   return new Promise((resolve) => {
     const originalUrl = url; // Store the original URL exactly as provided
-    let currentUrl = url;
     
-    // Add HTTPS protocol if missing, but don't count it as a redirect
+    // Normalize URL internally without counting as redirect
+    let currentUrl = url;
     if (!url.match(/^https?:\/\//i)) {
       currentUrl = 'https://' + url;
     }
+    
+    // Extract domain without www for comparison
+    const getDomain = (url) => {
+      try {
+        const urlObj = new URL(url);
+        return urlObj.hostname.replace(/^www\./, '');
+      } catch (e) {
+        return url;
+      }
+    };
+    
+    const originalDomain = getDomain(originalUrl);
+    const currentDomain = getDomain(currentUrl);
 
     const redirectChain = [];
     let redirectCount = 0;
@@ -73,26 +86,53 @@ async function checkUrl(url) {
           const status = res.statusCode;
           const location = res.headers.location;
 
-          // Only add to redirect chain if it's an actual redirect
+          // Only add to redirect chain if it's an actual redirect and not just www/protocol normalization
           if ([301, 302, 303, 307, 308].includes(status) && location && redirectCount < 10) {
-            redirectCount++;
-            redirectChain.push({
-              status: status,
-              url: location
-            });
-
-            try {
-              const nextUrl = new URL(location, url).href;
-              const nextProtocol = nextUrl.startsWith('https:') ? https : http;
-              makeRequest(nextUrl, nextProtocol);
-            } catch (error) {
-              resolve({
-                source_url: originalUrl,
-                initial_status: status,
-                target_url: url,
-                redirect_chain: redirectChain,
-                error: `Invalid redirect URL: ${error.message}`
+            const redirectDomain = getDomain(location);
+            // Skip if the redirect is just adding www or protocol
+            if (redirectDomain === originalDomain) {
+              redirectCount++;
+              redirectChain.push({
+                status: status,
+                url: location,
+                is_normalization: true
               });
+
+              try {
+                const nextUrl = new URL(location, url).href;
+                const nextProtocol = nextUrl.startsWith('https:') ? https : http;
+                makeRequest(nextUrl, nextProtocol);
+              } catch (error) {
+                resolve({
+                  source_url: originalUrl,
+                  initial_status: status,
+                  target_url: url,
+                  redirect_chain: redirectChain,
+                  error: `Invalid redirect URL: ${error.message}`
+                });
+              }
+            } else {
+              // This is a real redirect to a different domain
+              redirectCount++;
+              redirectChain.push({
+                status: status,
+                url: location,
+                is_normalization: false
+              });
+
+              try {
+                const nextUrl = new URL(location, url).href;
+                const nextProtocol = nextUrl.startsWith('https:') ? https : http;
+                makeRequest(nextUrl, nextProtocol);
+              } catch (error) {
+                resolve({
+                  source_url: originalUrl,
+                  initial_status: status,
+                  target_url: url,
+                  redirect_chain: redirectChain,
+                  error: `Invalid redirect URL: ${error.message}`
+                });
+              }
             }
           } else {
             if (redirectChain.length > 0) {
@@ -103,7 +143,7 @@ async function checkUrl(url) {
                 source_url: originalUrl,
                 initial_status: status,
                 target_url: url,
-                redirect_chain: redirectChain,
+                redirect_chain: redirectChain.filter(r => !r.is_normalization),
                 error: 'Server does not allow this request method'
               });
               return;
@@ -112,7 +152,7 @@ async function checkUrl(url) {
               source_url: originalUrl,
               initial_status: redirectChain.length > 0 ? redirectChain[0].status : status,
               target_url: url,
-              redirect_chain: redirectChain,
+              redirect_chain: redirectChain.filter(r => !r.is_normalization),
               error: ''
             });
           }
@@ -123,7 +163,7 @@ async function checkUrl(url) {
             source_url: originalUrl,
             initial_status: 0,
             target_url: url,
-            redirect_chain: redirectChain,
+            redirect_chain: redirectChain.filter(r => !r.is_normalization),
             error: error.message
           });
         });
@@ -134,7 +174,7 @@ async function checkUrl(url) {
             source_url: originalUrl,
             initial_status: 0,
             target_url: url,
-            redirect_chain: redirectChain,
+            redirect_chain: redirectChain.filter(r => !r.is_normalization),
             error: 'Request timed out'
           });
         });
