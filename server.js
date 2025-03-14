@@ -218,14 +218,86 @@ app.get('/', (req, res) => {
 // Handle URL checking with better error handling
 app.post('/api/check-urls', async (req, res) => {
   try {
-    // Process URLs from request
-    const processResult = await processUrls(req);
+    let urls = [];
+
+    // Handle file upload using busboy
+    if (req.headers['content-type'] && req.headers['content-type'].includes('multipart/form-data')) {
+      const busboy = Busboy({ headers: req.headers });
+      const filePromise = new Promise((resolve, reject) => {
+        busboy.on('file', (name, file, info) => {
+          if (name === 'urls') {
+            const chunks = [];
+            file.on('data', chunk => chunks.push(chunk));
+            file.on('end', () => {
+              const content = Buffer.concat(chunks).toString('utf8');
+              const results = Papa.parse(content, { header: true, skipEmptyLines: true });
+              
+              if (results.errors.length > 0) {
+                reject(new Error('Invalid CSV format: ' + results.errors.map(e => e.message).join(', ')));
+                return;
+              }
+
+              const fileUrls = results.data
+                .map(row => Object.values(row)[0])
+                .filter(url => url && url.trim());
+              resolve(fileUrls);
+            });
+            file.on('error', reject);
+          } else {
+            file.resume();
+          }
+        });
+        busboy.on('error', reject);
+        req.pipe(busboy);
+      });
+
+      try {
+        urls = await filePromise;
+      } catch (error) {
+        console.error('Error processing file:', error);
+        return res.status(400).json({ error: 'Error processing uploaded file: ' + error.message });
+      }
+    } else if (req.body.urls) {
+      // Handle JSON array of URLs
+      if (!Array.isArray(req.body.urls)) {
+        return res.status(400).json({ error: 'URLs must be provided as an array' });
+      }
+      urls = req.body.urls.filter(url => url && url.trim());
+    } else if (req.body.url) {
+      // Handle single URL
+      urls = [req.body.url];
+    }
+
+    // Filter out empty URLs
+    urls = urls.filter(url => url && url.trim());
+
+    if (urls.length === 0) {
+      return res.status(400).json({ error: 'No valid URLs provided' });
+    }
+
+    // Process all URLs
+    const results = await Promise.all(
+      urls.map(async url => {
+        try {
+          const result = await checkUrl(url);
+          return {
+            source_url: url,
+            ...result
+          };
+        } catch (error) {
+          return {
+            source_url: url,
+            error: error.message
+          };
+        }
+      })
+    );
 
     // Send response
     res.json({
       success: true,
       message: 'URLs processed successfully',
-      ...processResult
+      results: results
     });
 
   } catch (error) {
@@ -257,62 +329,4 @@ app.use((err, req, res, next) => {
 });
 
 // Export for Vercel
-module.exports = app;
-
-// Process URLs from request
-async function processUrls(req) {
-    let urls = [];
-    const errors = [];
-
-    if (req.file) {
-        // Handle CSV file upload
-        const fileContent = req.file.buffer.toString('utf8');
-        const results = Papa.parse(fileContent, { header: true, skipEmptyLines: true });
-        
-        if (results.errors.length > 0) {
-            return {
-                error: 'Invalid CSV format: ' + results.errors.map(e => e.message).join(', ')
-            };
-        }
-
-        urls = results.data
-            .map(row => Object.values(row)[0])
-            .filter(url => url && url.trim());
-    } else if (req.body.urls) {
-        // Handle JSON array of URLs
-        if (!Array.isArray(req.body.urls)) {
-            return { error: 'URLs must be provided as an array' };
-        }
-        urls = req.body.urls.filter(url => url && url.trim());
-    } else if (req.body.url) {
-        // Handle single URL
-        urls = [req.body.url];
-    }
-
-    // Filter out empty URLs
-    urls = urls.filter(url => url && url.trim());
-
-    if (urls.length === 0) {
-        return { error: 'No valid URLs provided' };
-    }
-
-    // Process all URLs
-    const results = await Promise.all(
-        urls.map(async url => {
-            try {
-                const result = await checkUrl(url);
-                return {
-                    source_url: url,
-                    ...result
-                };
-            } catch (error) {
-                return {
-                    source_url: url,
-                    error: error.message
-                };
-            }
-        })
-    );
-
-    return { results };
-} 
+module.exports = app; 
