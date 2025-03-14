@@ -277,34 +277,4 @@ app.use((err, req, res, next) => {
 });
 
 // Export for Vercel
-module.exports = app;
-
-// Only listen if not running on Vercel
-if (process.env.NODE_ENV !== 'production') {
-    const port = process.env.PORT || 3001;
-    app.listen(port, (err) => {
-        if (err) {
-            console.error('Error starting server:', err);
-            process.exit(1);
-        }
-        console.log(`Server running on port ${port}`);
-    });
-}
-
-// Handle uncaught exceptions
-process.on('uncaughtException', (err) => {
-    console.error('Uncaught Exception:', err);
-    // Don't exit in production
-    if (process.env.NODE_ENV !== 'production') {
-        process.exit(1);
-    }
-});
-
-// Handle unhandled promise rejections
-process.on('unhandledRejection', (reason, promise) => {
-    console.error('Unhandled Rejection at:', promise, 'reason:', reason);
-    // Don't exit in production
-    if (process.env.NODE_ENV !== 'production') {
-        process.exit(1);
-    }
-});
+module.exports = app; 
