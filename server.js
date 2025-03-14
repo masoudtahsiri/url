@@ -230,16 +230,48 @@ app.post('/api/check-urls', async (req, res) => {
             file.on('data', chunk => chunks.push(chunk));
             file.on('end', () => {
               const content = Buffer.concat(chunks).toString('utf8');
-              const results = Papa.parse(content, { header: true, skipEmptyLines: true });
+              // More flexible CSV parsing options
+              const results = Papa.parse(content, { 
+                header: false, 
+                skipEmptyLines: true,
+                delimiter: '', // auto-detect delimiter
+                preview: 1 // check first row to determine structure
+              });
               
-              if (results.errors.length > 0) {
-                reject(new Error('Invalid CSV format: ' + results.errors.map(e => e.message).join(', ')));
+              // Check if we have any data
+              if (results.data.length === 0) {
+                reject(new Error('No data found in CSV file'));
                 return;
               }
 
-              const fileUrls = results.data
-                .map(row => Object.values(row)[0])
-                .filter(url => url && url.trim());
+              // Get URLs from the CSV data - handle both single-column and multi-column cases
+              let fileUrls;
+              if (results.data[0].length === 1) {
+                // Single column CSV
+                fileUrls = results.data.map(row => row[0]);
+              } else {
+                // Multi-column CSV - try to find a column that looks like URLs
+                fileUrls = results.data.map(row => {
+                  // Look for the first cell that looks like a URL
+                  const urlCell = row.find(cell => 
+                    cell && 
+                    typeof cell === 'string' && 
+                    (cell.includes('http') || cell.includes('www') || !cell.includes(','))
+                  );
+                  return urlCell || '';
+                });
+              }
+
+              // Filter valid URLs
+              fileUrls = fileUrls
+                .filter(url => url && url.trim())
+                .map(url => url.trim());
+
+              if (fileUrls.length === 0) {
+                reject(new Error('No valid URLs found in the CSV file'));
+                return;
+              }
+
               resolve(fileUrls);
             });
             file.on('error', reject);
