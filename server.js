@@ -37,9 +37,9 @@ async function checkUrl(url) {
     const originalUrl = url; // Store the original URL exactly as provided
     let currentUrl = url;
     
-    // Add protocol if missing, but don't count it as a redirect
+    // Add HTTPS protocol if missing, but don't count it as a redirect
     if (!url.match(/^https?:\/\//i)) {
-      currentUrl = 'http://' + url;
+      currentUrl = 'https://' + url;
     }
 
     const redirectChain = [];
