@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>URL Checker</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        .loading {
+            display: none;
+        }
+        .loading.active {
+            display: flex;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <h1 class="text-4xl font-bold text-center mb-8">URL Checker</h1>
+        
+        <div class="bg-white rounded-lg shadow-lg p-6 mb-8">
+            <div class="mb-6">
+                <h2 class="text-xl font-semibold mb-4">Upload CSV File</h2>
+                <input type="file" id="fileInput" accept=".csv" class="w-full p-2 border rounded">
+                <p class="text-sm text-gray-600 mt-2">First row will be treated as headers</p>
+            </div>
+
+            <div class="mb-6">
+                <h2 class="text-xl font-semibold mb-4">Or Enter URLs</h2>
+                <textarea id="urlsInput" rows="5" class="w-full p-2 border rounded" placeholder="Enter one URL per line"></textarea>
+            </div>
+
+            <button id="checkButton" class="bg-blue-500 text-white px-6 py-2 rounded hover:bg-blue-600 transition-colors">
+                Check URLs
+            </button>
+
+            <div id="loading" class="loading items-center justify-center mt-4">
+                <svg class="animate-spin h-5 w-5 mr-3 text-blue-500" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <span>Processing...</span>
+            </div>
+        </div>
+
+        <div id="results" class="bg-white rounded-lg shadow-lg p-6 hidden">
+            <h2 class="text-xl font-semibold mb-4">Results</h2>
+            <div id="resultsTable" class="overflow-x-auto">
+                <table class="min-w-full table-auto">
+                    <thead>
+                        <tr class="bg-gray-100">
+                            <th class="px-4 py-2 text-left">Source URL</th>
+                            <th class="px-4 py-2 text-left">Target URL</th>
+                            <th class="px-4 py-2 text-left">Status Codes</th>
+                            <th class="px-4 py-2 text-left">Redirect Count</th>
+                        </tr>
+                    </thead>
+                    <tbody id="resultsBody"></tbody>
+                </table>
+            </div>
+            <div class="mt-4">
+                <button id="downloadCsv" class="bg-green-500 text-white px-6 py-2 rounded hover:bg-green-600 transition-colors">
+                    Download CSV
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const fileInput = document.getElementById('fileInput');
+        const urlsInput = document.getElementById('urlsInput');
+        const checkButton = document.getElementById('checkButton');
+        const loading = document.getElementById('loading');
+        const results = document.getElementById('results');
+        const resultsBody = document.getElementById('resultsBody');
+        const downloadCsv = document.getElementById('downloadCsv');
+
+        let csvData = null;
+
+        checkButton.addEventListener('click', async () => {
+            const formData = new FormData();
+            
+            if (fileInput.files.length > 0) {
+                formData.append('urls', fileInput.files[0]);
+            }
+            
+            if (urlsInput.value.trim()) {
+                formData.append('urls_text', urlsInput.value.trim());
+            }
+
+            if (!fileInput.files.length && !urlsInput.value.trim()) {
+                alert('Please provide URLs either through file upload or text input');
+                return;
+            }
+
+            loading.classList.add('active');
+            results.classList.add('hidden');
+
+            try {
+                const response = await fetch('/api/check-urls', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to process URLs');
+                }
+
+                csvData = data.csv;
+                resultsBody.innerHTML = '';
+
+                data.results.forEach(result => {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td class="border px-4 py-2">${result.source_url}</td>
+                        <td class="border px-4 py-2">${result.target_url}</td>
+                        <td class="border px-4 py-2">${result.redirect_chain.map(r => r.status).join(' → ')}</td>
+                        <td class="border px-4 py-2">${result.redirect_chain.length}</td>
+                    `;
+                    resultsBody.appendChild(row);
+                });
+
+                results.classList.remove('hidden');
+            } catch (error) {
+                alert(error.message);
+            } finally {
+                loading.classList.remove('active');
+            }
+        });
+
+        downloadCsv.addEventListener('click', () => {
+            if (!csvData) return;
+
+            const blob = new Blob([csvData], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `url_check_results_${Date.now()}.csv`;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+        });
+    </script>
+</body>
+</html> 

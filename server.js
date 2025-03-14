@@ -25,6 +25,9 @@ app.use(compression());
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ extended: true, limit: '100mb' }));
 
+// Serve static files from the public directory
+app.use(express.static(path.join(__dirname, 'public')));
+
 // Function to check URL redirects
 async function checkUrl(url) {
     // Add http:// if no protocol is specified
@@ -110,6 +113,11 @@ async function checkUrl(url) {
         makeRequest(url, protocol);
     });
 }
+
+// Handle root route
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
 
 // Handle URL checking
 app.post('/api/check-urls', upload.single('urls'), async (req, res) => {
@@ -210,6 +218,17 @@ app.post('/api/check-urls', upload.single('urls'), async (req, res) => {
 // Handle OPTIONS requests
 app.options('/api/check-urls', (req, res) => {
     res.sendStatus(200);
+});
+
+// Handle 404 errors
+app.use((req, res) => {
+    res.status(404).json({ error: 'Not Found' });
+});
+
+// Handle errors
+app.use((err, req, res, next) => {
+    console.error('Error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
 });
 
 // Export for Vercel
