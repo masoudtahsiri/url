@@ -68,7 +68,7 @@ async function checkUrl(url) {
       }
 
       const options = {
-        method: 'HEAD',
+        method: 'GET',
         timeout: 10000,
         headers: {
           'User-Agent': 'URLChecker/1.0',
@@ -105,6 +105,17 @@ async function checkUrl(url) {
           } else {
             if (redirectChain.length > 0) {
               redirectChain[redirectChain.length - 1].final_status = status;
+            }
+            if (status === 405) {
+              // Handle Method Not Allowed specifically
+              resolve({
+                source_url: originalUrl,
+                initial_status: status,
+                target_url: currentUrl,
+                redirect_chain: redirectChain,
+                error: 'Server does not allow this request method'
+              });
+              return;
             }
             resolve({
               source_url: originalUrl,
