@@ -34,21 +34,24 @@ if (php_sapi_name() !== 'cli') {
     }
 }
 
-// Set up temp directory
-$tempDir = getenv('TEMP_DIR') ?: (is_dir('/tmp') ? '/tmp' : sys_get_temp_dir());
+// Set up temp directory for Vercel
+$tempDir = getenv('VERCEL') ? '/tmp' : (getenv('TEMP_DIR') ?: (is_dir('/tmp') ? '/tmp' : sys_get_temp_dir()));
 $tempDir = rtrim($tempDir, '/') . '/temp';
 
 debug_log("Using temp directory: " . $tempDir);
 
+// Ensure temp directory exists with proper permissions
 if (!is_dir($tempDir)) {
     mkdir($tempDir, 0777, true);
+    chmod($tempDir, 0777);
 }
 
-// Create subdirectories
+// Create subdirectories with proper permissions
 foreach (['uploads', 'results'] as $dir) {
     $dirPath = $tempDir . '/' . $dir;
     if (!is_dir($dirPath)) {
         mkdir($dirPath, 0777, true);
+        chmod($dirPath, 0777);
     }
 }
 

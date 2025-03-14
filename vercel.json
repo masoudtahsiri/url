@@ -4,15 +4,30 @@
     {
       "src": "server.js",
       "use": "@vercel/node"
+    },
+    {
+      "src": "backend/**/*.php",
+      "use": "@vercel/php"
     }
   ],
   "routes": [
+    {
+      "src": "/api/check-urls",
+      "dest": "/server.js"
+    },
     {
       "src": "/(.*)",
       "dest": "/server.js"
     }
   ],
   "env": {
-    "NODE_ENV": "production"
+    "NODE_ENV": "production",
+    "VERCEL": "true"
+  },
+  "functions": {
+    "api/check-urls": {
+      "memory": 1024,
+      "maxDuration": 60
+    }
   }
 }

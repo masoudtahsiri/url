@@ -45,8 +45,11 @@ const upload = multer({
 const getTempDir = () => {
     const baseDir = process.env.VERCEL ? '/tmp' : process.cwd();
     const tempDir = path.join(baseDir, 'temp');
+    
+    // Ensure temp directory exists with proper permissions
     if (!fs.existsSync(tempDir)) {
         fs.mkdirSync(tempDir, { recursive: true });
+        fs.chmodSync(tempDir, '777');
     }
     return tempDir;
 };
@@ -58,6 +61,7 @@ const ensureDirectories = () => {
         const dirPath = path.join(tempDir, dir);
         if (!fs.existsSync(dirPath)) {
             fs.mkdirSync(dirPath, { recursive: true });
+            fs.chmodSync(dirPath, '777');
         }
     });
 };
@@ -128,10 +132,16 @@ app.post('/api/check-urls', upload.single('urls'), async (req, res) => {
             }
         }) + '\n');
 
-        // Start PHP process
+        // Start PHP process with environment variables
         console.log('Starting PHP process');
-        phpProcess = spawn('php', ['backend/api.php'], {
-            stdio: ['pipe', 'pipe', 'pipe']
+        const phpPath = process.env.VERCEL ? '/var/task/backend/api.php' : 'backend/api.php';
+        phpProcess = spawn('php', [phpPath], {
+            stdio: ['pipe', 'pipe', 'pipe'],
+            env: {
+                ...process.env,
+                VERCEL: process.env.VERCEL ? 'true' : '',
+                TEMP_DIR: getTempDir()
+            }
         });
 
         let phpOutput = '';
