@@ -45,7 +45,7 @@ async function checkUrl(url) {
     const originalUrl = url; // Store the original URL exactly as provided
     let currentUrl = url;
     
-    // Only modify the URL for making the request, not for display
+    // Add protocol if missing, but don't count it as a redirect
     if (!url.match(/^https?:\/\//i)) {
       currentUrl = 'http://' + url;
     }
@@ -81,6 +81,7 @@ async function checkUrl(url) {
           const status = res.statusCode;
           const location = res.headers.location;
 
+          // Only add to redirect chain if it's an actual redirect
           if ([301, 302, 303, 307, 308].includes(status) && location && redirectCount < 10) {
             redirectCount++;
             redirectChain.push({
@@ -90,14 +91,13 @@ async function checkUrl(url) {
 
             try {
               const nextUrl = new URL(location, url).href;
-              currentUrl = nextUrl;
               const nextProtocol = nextUrl.startsWith('https:') ? https : http;
               makeRequest(nextUrl, nextProtocol);
             } catch (error) {
               resolve({
                 source_url: originalUrl,
                 initial_status: status,
-                target_url: currentUrl,
+                target_url: url,
                 redirect_chain: redirectChain,
                 error: `Invalid redirect URL: ${error.message}`
               });
@@ -107,11 +107,10 @@ async function checkUrl(url) {
               redirectChain[redirectChain.length - 1].final_status = status;
             }
             if (status === 405) {
-              // Handle Method Not Allowed specifically
               resolve({
                 source_url: originalUrl,
                 initial_status: status,
-                target_url: currentUrl,
+                target_url: url,
                 redirect_chain: redirectChain,
                 error: 'Server does not allow this request method'
               });
@@ -120,7 +119,7 @@ async function checkUrl(url) {
             resolve({
               source_url: originalUrl,
               initial_status: redirectChain.length > 0 ? redirectChain[0].status : status,
-              target_url: currentUrl,
+              target_url: url,
               redirect_chain: redirectChain,
               error: ''
             });
