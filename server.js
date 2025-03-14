@@ -82,7 +82,9 @@ async function checkUrl(url) {
           'Sec-Fetch-Site': 'none',
           'Sec-Fetch-User': '?1',
           'Upgrade-Insecure-Requests': '1'
-        }
+        },
+        followRedirect: false, // Don't automatically follow redirects
+        maxRedirects: 0 // Disable automatic redirect following
       };
 
       try {
@@ -91,27 +93,39 @@ async function checkUrl(url) {
           const location = res.headers.location;
 
           // Consume the response data to properly end the request
-          res.on('data', () => {});
+          let rawData = '';
+          res.on('data', (chunk) => { rawData += chunk; });
+          
           res.on('end', () => {
-            if ([301, 302, 303, 307, 308].includes(status) && location && redirectCount < 10) {
+            if ([301, 302, 303, 307, 308].includes(status) && location) {
               redirectCount++;
+              
+              // Handle both absolute and relative redirect URLs
+              let redirectUrl;
+              try {
+                redirectUrl = new URL(location, url).href;
+              } catch (error) {
+                redirectUrl = location.startsWith('/') ? 
+                  `${url.protocol}//${url.host}${location}` : 
+                  `${url.protocol}//${url.host}/${location}`;
+              }
+
               redirectChain.push({
                 status: status,
-                url: location
+                url: redirectUrl
               });
 
-              try {
-                const nextUrl = new URL(location, url).href;
-                currentUrl = nextUrl;
-                const nextProtocol = nextUrl.startsWith('https:') ? https : http;
-                makeRequest(nextUrl, nextProtocol);
-              } catch (error) {
+              if (redirectCount < 10) {
+                currentUrl = redirectUrl;
+                const nextProtocol = redirectUrl.startsWith('https:') ? https : http;
+                makeRequest(redirectUrl, nextProtocol);
+              } else {
                 resolve({
                   source_url: url,
-                  initial_status: status,
+                  initial_status: redirectChain[0].status,
                   target_url: currentUrl,
-                  redirect_chain: [],
-                  error: `Invalid redirect URL: ${error.message}`
+                  redirect_chain: redirectChain,
+                  error: 'Max redirect limit reached'
                 });
               }
             } else {
