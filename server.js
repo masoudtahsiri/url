@@ -9,20 +9,10 @@ const cors = require('cors');
 const compression = require('compression');
 const https = require('https');
 const http = require('http');
-const multer = require('multer');
 const path = require('path');
 
 // Create Express app
 const app = express();
-
-// Configure multer for memory storage with limits
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB limit
-    files: 1
-  }
-});
 
 // Enable CORS and compression with proper options
 app.use(cors({
@@ -181,17 +171,9 @@ app.get('/', (req, res) => {
 });
 
 // Handle URL checking with better error handling
-app.post('/api/check-urls', upload.single('urls'), async (req, res) => {
+app.post('/api/check-urls', async (req, res) => {
   try {
     let urls = [];
-    
-    // Handle file upload
-    if (req.file) {
-      const content = req.file.buffer.toString('utf8');
-      urls = content.split('\n')
-        .map(line => line.trim())
-        .filter((line, index) => line && !line.startsWith('#') && index > 0); // Skip header row
-    }
     
     // Handle URLs from form data
     if (req.body.urls_text) {
