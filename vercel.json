@@ -4,17 +4,9 @@
     {
       "src": "server.js",
       "use": "@vercel/node"
-    },
-    {
-      "src": "backend/**/*.php",
-      "use": "@vercel/php"
     }
   ],
   "routes": [
-    {
-      "src": "/api/check-urls",
-      "dest": "/server.js"
-    },
     {
       "src": "/(.*)",
       "dest": "/server.js"

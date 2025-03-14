@@ -8,9 +8,10 @@ const express = require('express');
 const path = require('path');
 const cors = require('cors');
 const multer = require('multer');
-const { spawn } = require('child_process');
 const fs = require('fs');
 const compression = require('compression');
+const https = require('https');
+const http = require('http');
 
 const app = express();
 
@@ -32,12 +33,12 @@ app.use((req, res, next) => {
 // Serve static files from frontend directory
 app.use(express.static(path.join(__dirname, 'frontend')));
 
-// Configure multer for file uploads with increased limits
-const storage = multer.memoryStorage(); // Use memory storage for Vercel
+// Configure multer for file uploads
+const storage = multer.memoryStorage();
 const upload = multer({
     storage: storage,
     limits: {
-        fileSize: 50 * 1024 * 1024, // 50MB limit
+        fileSize: 50 * 1024 * 1024 // 50MB limit
     }
 });
 
@@ -45,11 +46,8 @@ const upload = multer({
 const getTempDir = () => {
     const baseDir = process.env.VERCEL ? '/tmp' : process.cwd();
     const tempDir = path.join(baseDir, 'temp');
-    
-    // Ensure temp directory exists with proper permissions
     if (!fs.existsSync(tempDir)) {
         fs.mkdirSync(tempDir, { recursive: true });
-        fs.chmodSync(tempDir, '777');
     }
     return tempDir;
 };
@@ -61,7 +59,6 @@ const ensureDirectories = () => {
         const dirPath = path.join(tempDir, dir);
         if (!fs.existsSync(dirPath)) {
             fs.mkdirSync(dirPath, { recursive: true });
-            fs.chmodSync(dirPath, '777');
         }
     });
 };
@@ -69,21 +66,89 @@ const ensureDirectories = () => {
 // Create directories at startup
 ensureDirectories();
 
+// Function to check URL redirects
+async function checkUrl(url) {
+    // Add http:// if no protocol is specified
+    if (!url.match(/^https?:\/\//i)) {
+        url = 'http://' + url;
+    }
+
+    return new Promise((resolve) => {
+        const redirectChain = [];
+        let currentUrl = url;
+        let redirectCount = 0;
+
+        function makeRequest(url, protocol) {
+            const options = {
+                method: 'GET',
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.9'
+                }
+            };
+
+            const req = protocol.get(url, options, (res) => {
+                const status = res.statusCode;
+                const location = res.headers.location;
+
+                if ([301, 302, 303, 307, 308].includes(status) && location && redirectCount < 10) {
+                    redirectCount++;
+                    redirectChain.push({
+                        status: status,
+                        url: location
+                    });
+
+                    // Handle relative URLs
+                    const nextUrl = new URL(location, url).href;
+                    currentUrl = nextUrl;
+                    
+                    // Follow the redirect
+                    const nextProtocol = nextUrl.startsWith('https:') ? https : http;
+                    makeRequest(nextUrl, nextProtocol);
+                } else {
+                    // Add final status to last redirect in chain
+                    if (redirectChain.length > 0) {
+                        redirectChain[redirectChain.length - 1].final_status = status;
+                    }
+
+                    resolve({
+                        source_url: url,
+                        initial_status: redirectChain.length > 0 ? redirectChain[0].status : status,
+                        target_url: currentUrl,
+                        redirect_chain: redirectChain,
+                        error: ''
+                    });
+                }
+            });
+
+            req.on('error', (error) => {
+                resolve({
+                    source_url: url,
+                    initial_status: 0,
+                    target_url: url,
+                    redirect_chain: [],
+                    error: error.message
+                });
+            });
+
+            req.end();
+        }
+
+        const protocol = url.startsWith('https:') ? https : http;
+        makeRequest(url, protocol);
+    });
+}
+
 // Handle file upload and URL checking
 app.post('/api/check-urls', upload.single('urls'), async (req, res) => {
     console.log('Received request to /api/check-urls');
     console.log('Request body:', req.body);
     console.log('File:', req.file);
-    
-    let phpProcess = null;
-    
+
     try {
         // Ensure directories exist before processing
         ensureDirectories();
-
-        // Set request timeout
-        req.setTimeout(600000); // 10 minutes
-        res.setTimeout(600000); // 10 minutes
 
         let urls = [];
         
@@ -119,131 +184,58 @@ app.post('/api/check-urls', upload.single('urls'), async (req, res) => {
 
         console.log('Final URLs to process:', urls);
 
-        // Set up response headers for streaming
-        res.setHeader('Content-Type', 'application/json');
-        res.setHeader('Transfer-Encoding', 'chunked');
-        res.flushHeaders();
+        // Process URLs
+        const results = await Promise.all(urls.map(url => checkUrl(url)));
 
-        // Send initial progress
-        res.write(JSON.stringify({
-            progress: {
-                current: 0,
-                total: urls.length
-            }
-        }) + '\n');
+        // Generate CSV file
+        const csvRows = [
+            'Original URL,Final URL,Status Codes,Redirect Count'
+        ];
 
-        // Start PHP process with environment variables
-        console.log('Starting PHP process');
-        const phpPath = process.env.VERCEL ? '/var/task/backend/api.php' : 'backend/api.php';
-        phpProcess = spawn('php', [phpPath], {
-            stdio: ['pipe', 'pipe', 'pipe'],
-            env: {
-                ...process.env,
-                VERCEL: process.env.VERCEL ? 'true' : '',
-                TEMP_DIR: getTempDir()
-            }
-        });
-
-        let phpOutput = '';
-        let phpError = '';
-
-        // Write URLs to PHP process stdin
-        phpProcess.stdin.write(JSON.stringify({ urls: urls }));
-        phpProcess.stdin.end();
-
-        phpProcess.stdout.on('data', (data) => {
-            phpOutput += data.toString();
-            console.log('PHP stdout:', data.toString());
-        });
-
-        phpProcess.stderr.on('data', (data) => {
-            phpError += data.toString();
-            console.log('PHP stderr:', data.toString());
-        });
-
-        // Wait for PHP process to complete
-        await new Promise((resolve, reject) => {
-            phpProcess.on('close', (code) => {
-                console.log('PHP process closed with code', code);
-                if (code === 0 && phpOutput) {
-                    resolve();
-                } else {
-                    reject(new Error(`PHP process failed with code ${code}\nOutput: ${phpOutput}\nError: ${phpError}`));
-                }
-            });
-        });
-
-        // Parse PHP output
-        try {
-            const output = JSON.parse(phpOutput);
-            console.log('PHP output:', output);
-
-            // Generate CSV file
-            const csvRows = [
-                'Original URL,Final URL,Status Codes,Redirect Count'
-            ];
-
-            output.results.forEach(result => {
-                const statusCodes = [];
-                
-                // Add all statuses from redirect chain
-                if (result.redirect_chain) {
-                    result.redirect_chain.forEach((redirect, index) => {
-                        if (redirect.status) {
-                            statusCodes.push(redirect.status);
-                        }
-                        // Only add final status for the last redirect
-                        if (redirect.final_status && index === result.redirect_chain.length - 1) {
-                            statusCodes.push(redirect.final_status);
-                        }
-                    });
-                }
-
-                csvRows.push([
-                    result.source_url,
-                    result.target_url,
-                    statusCodes.join(' → '),
-                    result.redirect_chain ? result.redirect_chain.length : 0
-                ].join(','));
-            });
-
-            // Create CSV content without the header row
-            const csvContent = csvRows.slice(1).join('\n');
+        results.forEach(result => {
+            const statusCodes = [];
             
-            // Generate unique filename
-            const filename = `results_${Date.now()}.csv`;
-            const filePath = path.join(getTempDir(), 'results', filename);
-            
-            // Ensure results directory exists
-            const resultsDir = path.join(getTempDir(), 'results');
-            if (!fs.existsSync(resultsDir)) {
-                fs.mkdirSync(resultsDir, { recursive: true });
+            // Add all statuses from redirect chain
+            if (result.redirect_chain) {
+                result.redirect_chain.forEach((redirect, index) => {
+                    if (redirect.status) {
+                        statusCodes.push(redirect.status);
+                    }
+                    // Only add final status for the last redirect
+                    if (redirect.final_status && index === result.redirect_chain.length - 1) {
+                        statusCodes.push(redirect.final_status);
+                    }
+                });
             }
-            
-            // Write CSV file
-            fs.writeFileSync(filePath, csvContent);
 
-            // Send final progress with results and file link
-            res.write(JSON.stringify({
-                progress: {
-                    current: urls.length,
-                    total: urls.length
-                },
-                results: output.results,
-                file: `/results/${filename}`
-            }) + '\n');
+            csvRows.push([
+                result.source_url,
+                result.target_url,
+                statusCodes.join(' → '),
+                result.redirect_chain ? result.redirect_chain.length : 0
+            ].join(','));
+        });
 
-            // End the response
-            res.end();
-        } catch (error) {
-            throw new Error(`Failed to parse PHP output: ${error.message}\nOutput: ${phpOutput}\nError: ${phpError}`);
-        }
+        // Create CSV content without the header row
+        const csvContent = csvRows.slice(1).join('\n');
+        
+        // Generate unique filename
+        const filename = `results_${Date.now()}.csv`;
+        const filePath = path.join(getTempDir(), 'results', filename);
+        
+        // Write CSV file
+        fs.writeFileSync(filePath, csvContent);
+
+        // Send response with results and file link
+        res.json({
+            success: true,
+            message: 'URLs processed successfully',
+            results: results,
+            file: `/results/${filename}`
+        });
 
     } catch (error) {
         console.error('Error processing URLs:', error);
-        if (phpProcess) {
-            phpProcess.kill();
-        }
         res.status(500).json({ error: error.message });
     }
 });
@@ -261,7 +253,7 @@ app.get('/results/:filename', (req, res) => {
         res.setHeader('Content-Disposition', `attachment; filename="${req.params.filename}"`);
         res.sendFile(filePath);
     } else {
-        res.status(404).json({ error: 'File not found' });
+        res.status(404).send('File not found');
     }
 });
 
