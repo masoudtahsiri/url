@@ -247,5 +247,13 @@ app.use((err, req, res, next) => {
   });
 });
 
+// Start server if not running in Vercel
+if (process.env.NODE_ENV !== 'production') {
+  const port = process.env.PORT || 3001;
+  app.listen(port, () => {
+    console.log(`Server running on port ${port}`);
+  });
+}
+
 // Export for Vercel
 module.exports = app; 
