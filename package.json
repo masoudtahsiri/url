@@ -1,11 +1,11 @@
 {
   "name": "url-checker",
   "version": "1.0.0",
-  "description": "URL Checker with redirect chain tracking",
+  "description": "URL redirect checker application",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "build": "mkdir -p /tmp/temp/uploads /tmp/temp/results && chmod -R 777 /tmp/temp || true"
+    "dev": "nodemon server.js"
   },
   "keywords": [],
   "author": "",
@@ -13,8 +13,11 @@
   "dependencies": {
     "express": "^4.18.2",
     "cors": "^2.8.5",
-    "multer": "^1.4.5-lts.1",
-    "compression": "^1.7.4"
+    "compression": "^1.7.4",
+    "multer": "^1.4.5-lts.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
   },
   "engines": {
     "node": ">=18.0.0"

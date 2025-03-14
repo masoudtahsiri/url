@@ -25,11 +25,7 @@ const upload = multer({
 });
 
 // Enable CORS and compression with proper options
-app.use(cors({
-  origin: '*',
-  methods: ['POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type']
-}));
+app.use(cors());
 app.use(compression());
 
 // Configure body-parser with limits
@@ -273,14 +269,6 @@ app.use((err, req, res, next) => {
     message: err.message
   });
 });
-
-// Start server if not being imported
-if (require.main === module) {
-  const port = process.env.PORT || 3001;
-  app.listen(port, () => {
-    console.log(`Server running on port ${port}`);
-  });
-}
 
 // Export for Vercel
 module.exports = app; 
