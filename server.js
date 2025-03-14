@@ -58,7 +58,7 @@ async function checkUrl(url) {
           source_url: url,
           initial_status: 0,
           target_url: url,
-          redirect_chain: redirectChain,
+          redirect_chain: [],
           error: 'Request timeout after 30 seconds'
         });
         return;
@@ -95,21 +95,32 @@ async function checkUrl(url) {
                 source_url: url,
                 initial_status: status,
                 target_url: currentUrl,
-                redirect_chain: redirectChain,
+                redirect_chain: [],
                 error: `Invalid redirect URL: ${error.message}`
               });
             }
           } else {
-            if (redirectChain.length > 0) {
-              redirectChain[redirectChain.length - 1].final_status = status;
+            // If there's no redirect (original URL equals final URL), don't include redirect chain
+            if (url === currentUrl) {
+              resolve({
+                source_url: url,
+                initial_status: status,
+                target_url: currentUrl,
+                redirect_chain: [],
+                error: ''
+              });
+            } else {
+              if (redirectChain.length > 0) {
+                redirectChain[redirectChain.length - 1].final_status = status;
+              }
+              resolve({
+                source_url: url,
+                initial_status: redirectChain.length > 0 ? redirectChain[0].status : status,
+                target_url: currentUrl,
+                redirect_chain: redirectChain,
+                error: ''
+              });
             }
-            resolve({
-              source_url: url,
-              initial_status: redirectChain.length > 0 ? redirectChain[0].status : status,
-              target_url: currentUrl,
-              redirect_chain: redirectChain,
-              error: ''
-            });
           }
         });
 
@@ -220,7 +231,8 @@ app.post('/api/check-urls', upload.single('urls'), async (req, res) => {
           if (result.redirect_chain[result.redirect_chain.length - 1].final_status) {
             statusChain.push(result.redirect_chain[result.redirect_chain.length - 1].final_status);
           }
-        } else if (result.initial_status) {
+        } else {
+          // If no redirect chain, just use the initial status
           statusChain = [result.initial_status];
         }
         
@@ -228,7 +240,7 @@ app.post('/api/check-urls', upload.single('urls'), async (req, res) => {
           result.source_url,
           result.target_url,
           statusChain.join(' → '),
-          result.redirect_chain.length,
+          result.redirect_chain ? result.redirect_chain.length : 0,
           result.error
         ].map(field => `"${String(field).replace(/"/g, '""')}"`).join(',');
       })

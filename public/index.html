@@ -496,7 +496,8 @@
                     if (result.redirect_chain[result.redirect_chain.length - 1].final_status) {
                         statusChain.push(result.redirect_chain[result.redirect_chain.length - 1].final_status);
                     }
-                } else if (result.initial_status) {
+                } else {
+                    // If no redirect chain, just use the initial status
                     statusChain = [result.initial_status];
                 }
                 
