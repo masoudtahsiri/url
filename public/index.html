@@ -610,54 +610,28 @@
         }
 
         async function handleResponse(response) {
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder();
-            let buffer = '';
-            let finalData = null;
-            let totalUrlCount = 0;
-            let firstProgressReceived = false;
-
-            while (true) {
-                const { value, done } = await reader.read();
-                if (done) break;
-
-                buffer += decoder.decode(value, { stream: true });
-                const lines = buffer.split('\n');
-                buffer = lines.pop() || '';
-
-                for (const line of lines) {
-                    if (line.trim()) {
-                        try {
-                            const data = JSON.parse(line);
-                            if (data.progress) {
-                                if (!firstProgressReceived) {
-                                    firstProgressReceived = true;
-                                    totalUrlCount = data.progress.total;
-                                    updateProgress(0, totalUrlCount);
-                                }
-                                updateProgress(data.progress.current, data.progress.total);
-                                // Only show results when progress is complete
-                                if (data.progress.current === data.progress.total && data.results) {
-                                    displayResults(data.results);
-                                }
-                            }
-                            if (data.file) {
-                                finalData = data;
-                            }
-                        } catch (e) {
-                            console.error('Error parsing response:', e);
-                        }
+            try {
+                const data = await response.json();
+                if (data.success) {
+                    displayResults(data.results);
+                    if (downloadButton) {
+                        // Create a Blob with the CSV content
+                        const blob = new Blob([data.csv], { type: 'text/csv' });
+                        const url = window.URL.createObjectURL(blob);
+                        downloadButton.href = url;
+                        downloadButton.download = 'url_check_results.csv';
+                        downloadButton.style.display = 'block';
                     }
+                    showAlert(`URLs processed successfully!`, 'success');
+                } else {
+                    throw new Error(data.error || 'Unknown error occurred');
                 }
+            } catch (error) {
+                console.error('Error processing response:', error);
+                showAlert(error.message || 'Error processing response', 'danger');
+            } finally {
+                if (progressSection) progressSection.style.display = 'none';
             }
-
-            // Show download link if available
-            if (finalData && finalData.file && downloadButton) {
-                downloadButton.href = finalData.file;
-                downloadButton.style.display = 'block';
-            }
-
-            showAlert(`${totalUrlCount} URLs processed successfully!`, 'success');
         }
 
         // Only add the event listener if the form exists
