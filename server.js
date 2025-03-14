@@ -27,8 +27,9 @@ const upload = multer({
 // Enable CORS and compression with proper options
 app.use(cors({
   origin: '*',
-  methods: ['POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type']
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Accept'],
+  maxAge: 86400 // 24 hours
 }));
 app.use(compression());
 
@@ -179,7 +180,7 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Handle URL checking
+// Handle URL checking with better error handling
 app.post('/api/check-urls', upload.single('urls'), async (req, res) => {
   try {
     let urls = [];
@@ -219,8 +220,17 @@ app.post('/api/check-urls', upload.single('urls'), async (req, res) => {
       });
     }
 
-    // Process URLs
-    const results = await Promise.all(urls.map(url => checkUrl(url)));
+    // Process URLs with timeout handling
+    const results = await Promise.all(
+      urls.map(url => 
+        Promise.race([
+          checkUrl(url),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Request timeout')), 30000)
+          )
+        ])
+      )
+    );
 
     // Send response
     res.json({
@@ -233,7 +243,7 @@ app.post('/api/check-urls', upload.single('urls'), async (req, res) => {
     console.error('Error processing URLs:', error);
     res.status(500).json({ 
       error: 'Internal Server Error',
-      message: error.message
+      message: error.message || 'An unexpected error occurred while processing URLs'
     });
   }
 });
@@ -248,12 +258,12 @@ app.use((req, res) => {
   res.status(404).json({ error: 'Not Found' });
 });
 
-// Handle errors
+// Add proper error handling middleware
 app.use((err, req, res, next) => {
   console.error('Error:', err);
   res.status(500).json({ 
     error: 'Internal Server Error',
-    message: err.message
+    message: err.message || 'An unexpected error occurred'
   });
 });
 
