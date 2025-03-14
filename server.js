@@ -66,7 +66,7 @@ async function checkUrl(url) {
           source_url: originalUrl,
           initial_status: 0,
           target_url: url,
-          redirect_chain: redirectChain.filter(r => !r.is_normalization),
+          redirect_chain: redirectChain,
           error: 'Request timeout after 30 seconds'
         });
         return;
@@ -86,33 +86,14 @@ async function checkUrl(url) {
           const status = res.statusCode;
           const location = res.headers.location;
 
-          // Only add to redirect chain if it's an actual redirect and not just www/protocol normalization
+          // Check if this is a redirect
           if ([301, 302, 303, 307, 308].includes(status) && location && redirectCount < 10) {
             const redirectDomain = getDomain(location);
-            // Skip if the redirect is just adding www or protocol
-            if (redirectDomain === originalDomain) {
-              redirectCount++;
-              redirectChain.push({
-                status: status,
-                url: location,
-                is_normalization: true
-              });
-
-              try {
-                const nextUrl = new URL(location, url).href;
-                const nextProtocol = nextUrl.startsWith('https:') ? https : http;
-                makeRequest(nextUrl, nextProtocol);
-              } catch (error) {
-                resolve({
-                  source_url: originalUrl,
-                  initial_status: status,
-                  target_url: url,
-                  redirect_chain: redirectChain.filter(r => !r.is_normalization),
-                  error: `Invalid redirect URL: ${error.message}`
-                });
-              }
-            } else {
-              // This is a real redirect to a different domain
+            const currentPath = new URL(url).pathname;
+            const redirectPath = new URL(location, url).pathname;
+            
+            // Add to redirect chain if it's a real redirect (different path) or different domain
+            if (redirectPath !== currentPath || redirectDomain !== originalDomain) {
               redirectCount++;
               redirectChain.push({
                 status: status,
@@ -129,7 +110,29 @@ async function checkUrl(url) {
                   source_url: originalUrl,
                   initial_status: status,
                   target_url: url,
-                  redirect_chain: redirectChain.filter(r => !r.is_normalization),
+                  redirect_chain: redirectChain,
+                  error: `Invalid redirect URL: ${error.message}`
+                });
+              }
+            } else {
+              // This is just a protocol/www normalization
+              redirectCount++;
+              redirectChain.push({
+                status: status,
+                url: location,
+                is_normalization: true
+              });
+
+              try {
+                const nextUrl = new URL(location, url).href;
+                const nextProtocol = nextUrl.startsWith('https:') ? https : http;
+                makeRequest(nextUrl, nextProtocol);
+              } catch (error) {
+                resolve({
+                  source_url: originalUrl,
+                  initial_status: status,
+                  target_url: url,
+                  redirect_chain: redirectChain,
                   error: `Invalid redirect URL: ${error.message}`
                 });
               }
@@ -143,17 +146,16 @@ async function checkUrl(url) {
                 source_url: originalUrl,
                 initial_status: status,
                 target_url: url,
-                redirect_chain: redirectChain.filter(r => !r.is_normalization),
+                redirect_chain: redirectChain,
                 error: 'Server does not allow this request method'
               });
               return;
             }
             resolve({
               source_url: originalUrl,
-              initial_status: redirectChain.filter(r => !r.is_normalization).length > 0 ? 
-                redirectChain.find(r => !r.is_normalization).status : status,
+              initial_status: redirectChain.length > 0 ? redirectChain[0].status : status,
               target_url: url,
-              redirect_chain: redirectChain.filter(r => !r.is_normalization),
+              redirect_chain: redirectChain,
               error: ''
             });
           }
@@ -164,7 +166,7 @@ async function checkUrl(url) {
             source_url: originalUrl,
             initial_status: 0,
             target_url: url,
-            redirect_chain: redirectChain.filter(r => !r.is_normalization),
+            redirect_chain: redirectChain,
             error: error.message
           });
         });
@@ -175,7 +177,7 @@ async function checkUrl(url) {
             source_url: originalUrl,
             initial_status: 0,
             target_url: url,
-            redirect_chain: redirectChain.filter(r => !r.is_normalization),
+            redirect_chain: redirectChain,
             error: 'Request timed out'
           });
         });
