@@ -66,7 +66,7 @@ async function checkUrl(url) {
           source_url: originalUrl,
           initial_status: 0,
           target_url: url,
-          redirect_chain: redirectChain,
+          redirect_chain: redirectChain.filter(r => !r.is_normalization),
           error: 'Request timeout after 30 seconds'
         });
         return;
@@ -107,7 +107,7 @@ async function checkUrl(url) {
                   source_url: originalUrl,
                   initial_status: status,
                   target_url: url,
-                  redirect_chain: redirectChain,
+                  redirect_chain: redirectChain.filter(r => !r.is_normalization),
                   error: `Invalid redirect URL: ${error.message}`
                 });
               }
@@ -129,7 +129,7 @@ async function checkUrl(url) {
                   source_url: originalUrl,
                   initial_status: status,
                   target_url: url,
-                  redirect_chain: redirectChain,
+                  redirect_chain: redirectChain.filter(r => !r.is_normalization),
                   error: `Invalid redirect URL: ${error.message}`
                 });
               }
