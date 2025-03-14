@@ -58,7 +58,7 @@ async function checkUrl(url) {
     function makeRequest(url, protocol) {
       if (Date.now() - startTime > TIMEOUT) {
         resolve({
-          source_url: url,
+          source_url: originalUrl,
           initial_status: 0,
           target_url: url,
           redirect_chain: redirectChain,
@@ -95,7 +95,7 @@ async function checkUrl(url) {
               makeRequest(nextUrl, nextProtocol);
             } catch (error) {
               resolve({
-                source_url: url,
+                source_url: originalUrl,
                 initial_status: status,
                 target_url: currentUrl,
                 redirect_chain: redirectChain,
@@ -107,7 +107,7 @@ async function checkUrl(url) {
               redirectChain[redirectChain.length - 1].final_status = status;
             }
             resolve({
-              source_url: url,
+              source_url: originalUrl,
               initial_status: redirectChain.length > 0 ? redirectChain[0].status : status,
               target_url: currentUrl,
               redirect_chain: redirectChain,
@@ -118,7 +118,7 @@ async function checkUrl(url) {
 
         req.on('error', (error) => {
           resolve({
-            source_url: url,
+            source_url: originalUrl,
             initial_status: 0,
             target_url: url,
             redirect_chain: redirectChain,
@@ -129,7 +129,7 @@ async function checkUrl(url) {
         req.on('timeout', () => {
           req.destroy();
           resolve({
-            source_url: url,
+            source_url: originalUrl,
             initial_status: 0,
             target_url: url,
             redirect_chain: redirectChain,
@@ -140,11 +140,11 @@ async function checkUrl(url) {
         req.end();
       } catch (error) {
         resolve({
-          source_url: url,
+          source_url: originalUrl,
           initial_status: 0,
           target_url: url,
-          redirect_chain: redirectChain,
-          error: `Request failed: ${error.message}`
+          redirect_chain: [],
+          error: `Invalid URL: ${error.message}`
         });
       }
     }
@@ -154,7 +154,7 @@ async function checkUrl(url) {
       makeRequest(currentUrl, protocol);
     } catch (error) {
       resolve({
-        source_url: url,
+        source_url: originalUrl,
         initial_status: 0,
         target_url: url,
         redirect_chain: [],
@@ -212,37 +212,11 @@ app.post('/api/check-urls', upload.single('urls'), async (req, res) => {
     // Process URLs
     const results = await Promise.all(urls.map(url => checkUrl(url)));
 
-    // Generate CSV content
-    const csvContent = [
-      ['Source URL', 'Target URL', 'Status Code Chain', 'Redirect Count', 'Error'].join(','),
-      ...results.map(result => {
-        // Build complete status chain including final status
-        let statusChain = [];
-        if (result.redirect_chain && result.redirect_chain.length > 0) {
-          statusChain = result.redirect_chain.map(r => r.status);
-          if (result.redirect_chain[result.redirect_chain.length - 1].final_status) {
-            statusChain.push(result.redirect_chain[result.redirect_chain.length - 1].final_status);
-          }
-        } else if (result.initial_status) {
-          statusChain = [result.initial_status];
-        }
-        
-        return [
-          result.source_url,
-          result.target_url,
-          statusChain.join(' → '),
-          result.redirect_chain.length,
-          result.error
-        ].map(field => `"${String(field).replace(/"/g, '""')}"`).join(',');
-      })
-    ].join('\n');
-
     // Send response
     res.json({
       success: true,
       message: 'URLs processed successfully',
-      results: results,
-      csv: csvContent
+      results: results
     });
 
   } catch (error) {
