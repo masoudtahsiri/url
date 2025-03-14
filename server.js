@@ -45,7 +45,7 @@ async function checkUrl(url) {
     let originalUrl = url; // Store the original URL exactly as provided
     let currentUrl = url;
     if (!url.match(/^https?:\/\//i)) {
-      currentUrl = 'http://' + url;
+      currentUrl = 'https://' + url;
     }
 
     const redirectChain = [];
