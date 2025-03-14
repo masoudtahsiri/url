@@ -10,6 +10,7 @@ const compression = require('compression');
 const https = require('https');
 const http = require('http');
 const path = require('path');
+const Busboy = require('busboy');
 
 // Create Express app
 const app = express();
@@ -174,6 +175,39 @@ app.get('/', (req, res) => {
 app.post('/api/check-urls', async (req, res) => {
   try {
     let urls = [];
+    
+    // Handle file upload using busboy
+    if (req.headers['content-type'] && req.headers['content-type'].includes('multipart/form-data')) {
+      const busboy = Busboy({ headers: req.headers });
+      const filePromise = new Promise((resolve, reject) => {
+        busboy.on('file', (name, file, info) => {
+          if (name === 'urls') {
+            const chunks = [];
+            file.on('data', chunk => chunks.push(chunk));
+            file.on('end', () => {
+              const content = Buffer.concat(chunks).toString('utf8');
+              const fileUrls = content.split('\n')
+                .map(line => line.trim())
+                .filter((line, index) => line && !line.startsWith('#') && index > 0); // Skip header row
+              resolve(fileUrls);
+            });
+            file.on('error', reject);
+          } else {
+            file.resume();
+          }
+        });
+        busboy.on('error', reject);
+        req.pipe(busboy);
+      });
+
+      try {
+        const fileUrls = await filePromise;
+        urls = urls.concat(fileUrls);
+      } catch (error) {
+        console.error('Error processing file:', error);
+        return res.status(400).json({ error: 'Error processing uploaded file' });
+      }
+    }
     
     // Handle URLs from form data
     if (req.body.urls_text) {
