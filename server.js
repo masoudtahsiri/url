@@ -46,10 +46,16 @@ const upload = multer({
 const getTempDir = () => {
     const baseDir = process.env.VERCEL ? '/tmp' : process.cwd();
     const tempDir = path.join(baseDir, 'temp');
-    if (!fs.existsSync(tempDir)) {
-        fs.mkdirSync(tempDir, { recursive: true });
+    try {
+        if (!fs.existsSync(tempDir)) {
+            fs.mkdirSync(tempDir, { recursive: true });
+        }
+        return tempDir;
+    } catch (error) {
+        console.error('Error creating temp directory:', error);
+        // Fallback to system temp directory
+        return require('os').tmpdir();
     }
-    return tempDir;
 };
 
 // Ensure required directories exist
@@ -57,14 +63,22 @@ const ensureDirectories = () => {
     const tempDir = getTempDir();
     ['uploads', 'results'].forEach(dir => {
         const dirPath = path.join(tempDir, dir);
-        if (!fs.existsSync(dirPath)) {
-            fs.mkdirSync(dirPath, { recursive: true });
+        try {
+            if (!fs.existsSync(dirPath)) {
+                fs.mkdirSync(dirPath, { recursive: true });
+            }
+        } catch (error) {
+            console.error(`Error creating ${dir} directory:`, error);
         }
     });
 };
 
 // Create directories at startup
-ensureDirectories();
+try {
+    ensureDirectories();
+} catch (error) {
+    console.error('Error ensuring directories:', error);
+}
 
 // Function to check URL redirects
 async function checkUrl(url) {
@@ -148,7 +162,7 @@ app.post('/api/check-urls', upload.single('urls'), async (req, res) => {
 
     try {
         // Ensure directories exist before processing
-        ensureDirectories();
+        await ensureDirectories();
 
         let urls = [];
         
@@ -184,47 +198,55 @@ app.post('/api/check-urls', upload.single('urls'), async (req, res) => {
 
         console.log('Final URLs to process:', urls);
 
-        // Process URLs
-        const results = await Promise.all(urls.map(url => checkUrl(url)));
+        // Process URLs with timeout
+        const timeout = 30000; // 30 seconds timeout
+        const results = await Promise.all(
+            urls.map(url => 
+                Promise.race([
+                    checkUrl(url),
+                    new Promise((_, reject) => 
+                        setTimeout(() => reject(new Error('Timeout')), timeout)
+                    )
+                ]).catch(error => ({
+                    source_url: url,
+                    initial_status: 0,
+                    target_url: url,
+                    redirect_chain: [],
+                    error: error.message
+                }))
+            )
+        );
 
-        // Generate CSV file
-        const csvRows = [
-            'Original URL,Final URL,Status Codes,Redirect Count'
-        ];
-
-        results.forEach(result => {
+        // Generate CSV content without headers
+        const csvContent = results.map(result => {
             const statusCodes = [];
-            
-            // Add all statuses from redirect chain
             if (result.redirect_chain) {
                 result.redirect_chain.forEach((redirect, index) => {
-                    if (redirect.status) {
-                        statusCodes.push(redirect.status);
-                    }
-                    // Only add final status for the last redirect
+                    if (redirect.status) statusCodes.push(redirect.status);
                     if (redirect.final_status && index === result.redirect_chain.length - 1) {
                         statusCodes.push(redirect.final_status);
                     }
                 });
             }
-
-            csvRows.push([
+            return [
                 result.source_url,
                 result.target_url,
                 statusCodes.join(' → '),
                 result.redirect_chain ? result.redirect_chain.length : 0
-            ].join(','));
-        });
+            ].join(',');
+        }).join('\n');
 
-        // Create CSV content without the header row
-        const csvContent = csvRows.slice(1).join('\n');
-        
         // Generate unique filename
         const filename = `results_${Date.now()}.csv`;
         const filePath = path.join(getTempDir(), 'results', filename);
         
         // Write CSV file
-        fs.writeFileSync(filePath, csvContent);
+        try {
+            fs.writeFileSync(filePath, csvContent);
+        } catch (error) {
+            console.error('Error writing CSV file:', error);
+            return res.status(500).json({ error: 'Failed to save results' });
+        }
 
         // Send response with results and file link
         res.json({

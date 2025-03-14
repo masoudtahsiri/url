@@ -5,7 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "build": "mkdir -p /tmp/temp/uploads /tmp/temp/results && chmod -R 777 /tmp/temp"
+    "build": "mkdir -p /tmp/temp/uploads /tmp/temp/results && chmod -R 777 /tmp/temp || true"
   },
   "keywords": [],
   "author": "",
@@ -17,7 +17,6 @@
     "compression": "^1.7.4"
   },
   "engines": {
-    "node": ">=18.0.0",
-    "php": "^8.0.0"
+    "node": ">=18.0.0"
   }
 }
