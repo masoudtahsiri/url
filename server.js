@@ -65,7 +65,7 @@ async function checkUrl(url) {
       }
 
       const options = {
-        method: 'HEAD', // Use HEAD instead of GET to reduce data transfer
+        method: 'HEAD',
         timeout: 10000,
         headers: {
           'User-Agent': 'URLChecker/1.0',
@@ -166,7 +166,7 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Handle URL checking with proper error handling
+// Handle URL checking
 app.post('/api/check-urls', upload.single('urls'), async (req, res) => {
   try {
     let urls = [];
@@ -206,23 +206,8 @@ app.post('/api/check-urls', upload.single('urls'), async (req, res) => {
       });
     }
 
-    // Process URLs with timeout
-    const results = await Promise.all(
-      urls.map(url => 
-        Promise.race([
-          checkUrl(url),
-          new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Operation timeout')), 30000)
-          )
-        ]).catch(error => ({
-          source_url: url,
-          initial_status: 0,
-          target_url: url,
-          redirect_chain: [],
-          error: error.message
-        }))
-      )
-    );
+    // Process URLs
+    const results = await Promise.all(urls.map(url => checkUrl(url)));
 
     // Generate CSV content
     const csvContent = [
