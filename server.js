@@ -42,11 +42,9 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Function to check URL redirects with proper error handling
 async function checkUrl(url) {
   return new Promise((resolve) => {
-    let originalUrl = url; // Store the original URL exactly as provided
     let currentUrl = url;
     if (!url.match(/^https?:\/\//i)) {
-      currentUrl = 'https://' + url;
-      originalUrl = 'https://' + url; // Also update originalUrl to include the prefix
+      currentUrl = 'http://' + url;
     }
 
     const redirectChain = [];
@@ -57,7 +55,7 @@ async function checkUrl(url) {
     function makeRequest(url, protocol) {
       if (Date.now() - startTime > TIMEOUT) {
         resolve({
-          source_url: originalUrl, // Use original URL
+          source_url: url,
           initial_status: 0,
           target_url: url,
           redirect_chain: redirectChain,
@@ -94,7 +92,7 @@ async function checkUrl(url) {
               makeRequest(nextUrl, nextProtocol);
             } catch (error) {
               resolve({
-                source_url: originalUrl, // Use original URL
+                source_url: url,
                 initial_status: status,
                 target_url: currentUrl,
                 redirect_chain: redirectChain,
@@ -106,7 +104,7 @@ async function checkUrl(url) {
               redirectChain[redirectChain.length - 1].final_status = status;
             }
             resolve({
-              source_url: originalUrl, // Use original URL
+              source_url: url,
               initial_status: redirectChain.length > 0 ? redirectChain[0].status : status,
               target_url: currentUrl,
               redirect_chain: redirectChain,
@@ -117,7 +115,7 @@ async function checkUrl(url) {
 
         req.on('error', (error) => {
           resolve({
-            source_url: originalUrl, // Use original URL
+            source_url: url,
             initial_status: 0,
             target_url: url,
             redirect_chain: redirectChain,
@@ -128,7 +126,7 @@ async function checkUrl(url) {
         req.on('timeout', () => {
           req.destroy();
           resolve({
-            source_url: originalUrl, // Use original URL
+            source_url: url,
             initial_status: 0,
             target_url: url,
             redirect_chain: redirectChain,
@@ -139,11 +137,11 @@ async function checkUrl(url) {
         req.end();
       } catch (error) {
         resolve({
-          source_url: originalUrl, // Use original URL
+          source_url: url,
           initial_status: 0,
           target_url: url,
-          redirect_chain: [],
-          error: `Invalid URL: ${error.message}`
+          redirect_chain: redirectChain,
+          error: `Request failed: ${error.message}`
         });
       }
     }
@@ -153,7 +151,7 @@ async function checkUrl(url) {
       makeRequest(currentUrl, protocol);
     } catch (error) {
       resolve({
-        source_url: originalUrl, // Use original URL
+        source_url: url,
         initial_status: 0,
         target_url: url,
         redirect_chain: [],
