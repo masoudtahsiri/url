@@ -58,7 +58,7 @@ async function checkUrl(url) {
           source_url: url,
           initial_status: 0,
           target_url: url,
-          redirect_chain: redirectChain,
+          redirect_chain: [],
           error: 'Request timeout after 30 seconds'
         });
         return;
@@ -100,9 +100,7 @@ async function checkUrl(url) {
               });
             }
           } else {
-            if (redirectChain.length > 0) {
-              redirectChain[redirectChain.length - 1].final_status = status;
-            }
+            // Only include initial_status if there were redirects
             resolve({
               source_url: url,
               initial_status: redirectChain.length > 0 ? redirectChain[0].status : status,
@@ -110,6 +108,11 @@ async function checkUrl(url) {
               redirect_chain: redirectChain,
               error: ''
             });
+
+            // If there were redirects, add the final status to the last redirect
+            if (redirectChain.length > 0) {
+              redirectChain[redirectChain.length - 1].final_status = status;
+            }
           }
         });
 
@@ -118,7 +121,7 @@ async function checkUrl(url) {
             source_url: url,
             initial_status: 0,
             target_url: url,
-            redirect_chain: redirectChain,
+            redirect_chain: [],
             error: error.message
           });
         });
@@ -129,7 +132,7 @@ async function checkUrl(url) {
             source_url: url,
             initial_status: 0,
             target_url: url,
-            redirect_chain: redirectChain,
+            redirect_chain: [],
             error: 'Request timed out'
           });
         });
@@ -140,7 +143,7 @@ async function checkUrl(url) {
           source_url: url,
           initial_status: 0,
           target_url: url,
-          redirect_chain: redirectChain,
+          redirect_chain: [],
           error: `Request failed: ${error.message}`
         });
       }
