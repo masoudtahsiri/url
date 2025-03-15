@@ -179,11 +179,14 @@ async function processBatch(urls, startIndex) {
 async function processUrlsInChunks(urls) {
     const results = [];
     const chunks = [];
+    const totalUrls = urls.length;
     
     // Split URLs into chunks
-    for (let i = 0; i < urls.length; i += BATCH_SIZE * MAX_CONCURRENT_BATCHES) {
+    for (let i = 0; i < totalUrls; i += BATCH_SIZE * MAX_CONCURRENT_BATCHES) {
         chunks.push(urls.slice(i, i + BATCH_SIZE * MAX_CONCURRENT_BATCHES));
     }
+    
+    let processedCount = 0;
     
     // Process each chunk
     for (let i = 0; i < chunks.length; i++) {
@@ -196,9 +199,9 @@ async function processUrlsInChunks(urls) {
         
         results.push(...chunkResults.flat());
         
-        // Log progress
-        const processed = Math.min((i + 1) * BATCH_SIZE * MAX_CONCURRENT_BATCHES, urls.length);
-        console.log(`Progress: ${processed}/${urls.length} (${Math.round((processed / urls.length) * 100)}%)`);
+        // Update and log progress
+        processedCount += chunk.length;
+        console.log(`Progress: ${processedCount}/${totalUrls} (${Math.round((processedCount / totalUrls) * 100)}%)`);
     }
     
     return results;
@@ -219,13 +222,14 @@ app.post('/api/check-urls', async (req, res) => {
                         const processBuffer = () => {
                             try {
                                 const results = Papa.parse(buffer, {
-                                    header: false,
+                                    header: true, // This will treat first row as headers
                                     skipEmptyLines: true,
                                     delimiter: ','
                                 });
                                 
+                                // Get URLs from the first column, regardless of its name
                                 const newUrls = results.data
-                                    .map(row => row[0]?.trim())
+                                    .map(row => Object.values(row)[0]?.trim())
                                     .filter(Boolean);
                                 
                                 if (newUrls.length > 0) {
