@@ -27,10 +27,11 @@ app.use(bodyParser.urlencoded({ extended: true, limit: '50mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Constants
-const BATCH_SIZE = 20; // Process 20 URLs at a time
+const BATCH_SIZE = 10; // Reduced from 20 to 10 URLs per batch
 const URL_TIMEOUT = 8000; // 8 seconds per URL
 const MAX_REDIRECTS = 10;
 const MAX_CONCURRENT_BATCHES = 3; // Maximum number of concurrent batches
+const CHUNK_SIZE = 30; // Process 30 URLs at a time to stay within Vercel limits
 
 // Function to check a single URL with retry
 async function checkUrl(url, retryCount = 0) {
@@ -160,48 +161,71 @@ async function checkUrl(url, retryCount = 0) {
 }
 
 // Process URLs in smaller batches with controlled concurrency
-async function processBatch(urls, startIndex) {
+async function processBatch(urls, startIndex, res, totalUrls, processedSoFar = 0) {
     const batch = urls.slice(startIndex, startIndex + BATCH_SIZE);
     const results = [];
     
     // Process URLs one by one with a small delay between them
     for (const url of batch) {
-        const result = await checkUrl(url);
-        results.push(result);
-        // Add a small delay between requests (100ms)
-        await new Promise(resolve => setTimeout(resolve, 100));
+        try {
+            const result = await checkUrl(url);
+            results.push(result);
+            
+            // Update progress after each URL
+            processedSoFar++;
+            const progress = {
+                type: 'progress',
+                processed: processedSoFar,
+                total: totalUrls,
+                percent: Math.round((processedSoFar / totalUrls) * 100)
+            };
+            res.write(JSON.stringify(progress) + '\n');
+            
+            // Add a small delay between requests (100ms)
+            await new Promise(resolve => setTimeout(resolve, 100));
+        } catch (error) {
+            console.error(`Error processing URL ${url}:`, error);
+            results.push({
+                source_url: url,
+                initial_status: 0,
+                target_url: url,
+                redirect_chain: [],
+                error: 'Processing failed'
+            });
+        }
     }
     
-    return results;
+    return { results, processedSoFar };
 }
 
 // Process URLs in chunks to avoid timeouts
-async function processUrlsInChunks(urls) {
+async function processUrlsInChunks(urls, res) {
     const results = [];
-    const chunks = [];
     const totalUrls = urls.length;
+    let processedSoFar = 0;
     
-    // Split URLs into chunks
-    for (let i = 0; i < totalUrls; i += BATCH_SIZE * MAX_CONCURRENT_BATCHES) {
-        chunks.push(urls.slice(i, i + BATCH_SIZE * MAX_CONCURRENT_BATCHES));
-    }
-    
-    let processedCount = 0;
-    
-    // Process each chunk
-    for (let i = 0; i < chunks.length; i++) {
-        const chunk = chunks[i];
-        const chunkResults = await Promise.all(
-            Array.from({ length: Math.ceil(chunk.length / BATCH_SIZE) }, (_, index) =>
-                processBatch(chunk, index * BATCH_SIZE)
-            )
-        );
+    // Process in smaller chunks to avoid timeouts
+    for (let i = 0; i < totalUrls; i += CHUNK_SIZE) {
+        const chunk = urls.slice(i, Math.min(i + CHUNK_SIZE, totalUrls));
+        const chunkPromises = [];
         
-        results.push(...chunkResults.flat());
+        // Process each batch in the chunk
+        for (let j = 0; j < chunk.length; j += BATCH_SIZE) {
+            chunkPromises.push(
+                processBatch(chunk, j, res, totalUrls, processedSoFar + j)
+            );
+        }
         
-        // Update and log progress
-        processedCount += chunk.length;
-        console.log(`Progress: ${processedCount}/${totalUrls} (${Math.round((processedCount / totalUrls) * 100)}%)`);
+        try {
+            const chunkResults = await Promise.all(chunkPromises);
+            for (const { results: batchResults, processedSoFar: batchProcessed } of chunkResults) {
+                results.push(...batchResults);
+                processedSoFar = Math.max(processedSoFar, batchProcessed);
+            }
+        } catch (error) {
+            console.error('Error processing chunk:', error);
+            continue; // Continue with next chunk even if current one fails
+        }
     }
     
     return results;
@@ -222,12 +246,11 @@ app.post('/api/check-urls', async (req, res) => {
                         const processBuffer = () => {
                             try {
                                 const results = Papa.parse(buffer, {
-                                    header: true, // This will treat first row as headers
+                                    header: true,
                                     skipEmptyLines: true,
                                     delimiter: ','
                                 });
                                 
-                                // Get URLs from the first column, regardless of its name
                                 const newUrls = results.data
                                     .map(row => Object.values(row)[0]?.trim())
                                     .filter(Boolean);
@@ -283,39 +306,8 @@ app.post('/api/check-urls', async (req, res) => {
             total_urls: urls.length
         }) + '\n');
 
-        // Process URLs in chunks
-        const results = [];
-        const chunks = [];
-        const totalUrls = urls.length;
-        
-        // Split URLs into chunks
-        for (let i = 0; i < totalUrls; i += BATCH_SIZE * MAX_CONCURRENT_BATCHES) {
-            chunks.push(urls.slice(i, i + BATCH_SIZE * MAX_CONCURRENT_BATCHES));
-        }
-        
-        let processedCount = 0;
-        
-        // Process each chunk
-        for (let i = 0; i < chunks.length; i++) {
-            const chunk = chunks[i];
-            const chunkResults = await Promise.all(
-                Array.from({ length: Math.ceil(chunk.length / BATCH_SIZE) }, (_, index) =>
-                    processBatch(chunk, index * BATCH_SIZE)
-                )
-            );
-            
-            results.push(...chunkResults.flat());
-            
-            // Update and log progress
-            processedCount += chunk.length;
-            const progress = {
-                type: 'progress',
-                processed: processedCount,
-                total: totalUrls,
-                percent: Math.round((processedCount / totalUrls) * 100)
-            };
-            res.write(JSON.stringify(progress) + '\n');
-        }
+        // Process URLs with the new chunking mechanism
+        const results = await processUrlsInChunks(urls, res);
 
         // Generate CSV content
         const csvContent = generateCsvContent(results);
@@ -326,16 +318,28 @@ app.post('/api/check-urls', async (req, res) => {
             success: true,
             results: results,
             csv: csvContent,
-            total_processed: processedCount,
-            total_urls: totalUrls
+            total_processed: results.length,
+            total_urls: urls.length
         }));
 
     } catch (error) {
         console.error('Error processing URLs:', error);
-        res.status(500).json({
-            error: 'Internal Server Error',
-            message: error.message
-        });
+        // Try to send error response if we haven't sent anything yet
+        try {
+            if (!res.headersSent) {
+                res.status(500).json({
+                    error: 'Internal Server Error',
+                    message: error.message
+                });
+            } else {
+                res.end(JSON.stringify({
+                    type: 'error',
+                    error: error.message
+                }));
+            }
+        } catch (e) {
+            console.error('Error sending error response:', e);
+        }
     }
 });
 
