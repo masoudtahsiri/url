@@ -552,16 +552,12 @@
         async function handleSubmit(event) {
             event.preventDefault();
             
-            const progressBar = document.querySelector('#progressBar');
-            const progressText = document.querySelector('#progressText');
-            const resultsSection = document.querySelector('#resultsSection');
-            const submitBtn = document.querySelector('#submitBtn');
+            const progressBar = document.getElementById('progressBar');
+            const progressText = document.getElementById('progressText');
+            const resultsSection = document.getElementById('resultsSection');
+            const submitBtn = document.getElementById('submitBtn');
+            const progressSection = document.getElementById('progressSection');
             
-            if (!progressBar || !progressText || !resultsSection || !submitBtn) {
-                console.error('Required elements not found');
-                return;
-            }
-
             progressBar.style.width = '0%';
             progressText.textContent = 'Starting...';
             resultsSection.style.display = 'none';
@@ -570,12 +566,8 @@
             
             try {
                 const formData = new FormData();
-                const fileInput = document.querySelector('#csvFile');
-                const urlsTextarea = document.querySelector('#urls');
-                
-                if (!fileInput || !urlsTextarea) {
-                    throw new Error('Form inputs not found');
-                }
+                const fileInput = document.getElementById('csvFile');
+                const urlsTextarea = document.getElementById('urls');
                 
                 if (fileInput.files.length > 0) {
                     formData.append('urls', fileInput.files[0]);
@@ -653,14 +645,7 @@
                                         
                                         // Enable CSV download
                                         if (data.csv) {
-                                            const csvBlob = new Blob([data.csv], { type: 'text/csv' });
-                                            const downloadUrl = URL.createObjectURL(csvBlob);
-                                            const downloadButton = document.querySelector('#downloadButton');
-                                            if (downloadButton) {
-                                                downloadButton.href = downloadUrl;
-                                                downloadButton.download = 'url_check_results.csv';
-                                                downloadButton.style.display = 'inline-block';
-                                            }
+                                            enableDownload(data.csv);
                                         }
                                         break;
                                     
