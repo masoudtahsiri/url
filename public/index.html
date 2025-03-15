@@ -397,7 +397,7 @@
                         <div class="progress">
                             <div class="progress-bar" id="progressBar" role="progressbar" style="width: 0%"></div>
                         </div>
-                        <p class="text-center text-muted">
+                        <p class="text-center text-muted" id="progressText">
                             Processing: <span id="processedUrls">0</span> / <span id="totalUrls">0</span>
                         </p>
                     </div>
@@ -538,21 +538,35 @@
             });
         }
 
+        function enableDownload(csvContent) {
+            const downloadButton = document.getElementById('downloadButton');
+            if (!downloadButton) return;
+            
+            const blob = new Blob([csvContent], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            downloadButton.href = url;
+            downloadButton.download = `url_check_results_${new Date().toISOString().slice(0,10)}.csv`;
+            downloadButton.style.display = 'inline-block';
+        }
+
         async function handleSubmit(event) {
             event.preventDefault();
             
             const formData = new FormData();
             const fileInput = document.getElementById('csvFile');
             const urlsInput = document.getElementById('urls');
+            const progressSection = document.getElementById('progressSection');
             const progressBar = document.getElementById('progressBar');
             const progressText = document.getElementById('progressText');
-            const resultsDiv = document.getElementById('results');
+            const resultsSection = document.getElementById('resultsSection');
             
             try {
+                // Reset UI elements
+                progressSection.style.display = 'block';
+                resultsSection.style.display = 'none';
                 progressBar.style.width = '0%';
                 progressBar.textContent = '';
-                progressText.textContent = 'Processing...';
-                resultsDiv.innerHTML = '';
+                progressText.textContent = 'Preparing to process URLs...';
                 
                 if (fileInput.files.length > 0) {
                     formData.append('urls', fileInput.files[0]);
@@ -561,6 +575,7 @@
                     formData.append('urls', JSON.stringify(urls));
                 } else {
                     showAlert('Please provide URLs or upload a CSV file', 'danger');
+                    progressSection.style.display = 'none';
                     return;
                 }
 
