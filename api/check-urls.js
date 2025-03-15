@@ -162,7 +162,17 @@ async function checkUrl(url, retryCount = 0) {
 // Process URLs in smaller batches with controlled concurrency
 async function processBatch(urls, startIndex) {
     const batch = urls.slice(startIndex, startIndex + BATCH_SIZE);
-    return Promise.all(batch.map(url => checkUrl(url)));
+    const results = [];
+    
+    // Process URLs one by one with a small delay between them
+    for (const url of batch) {
+        const result = await checkUrl(url);
+        results.push(result);
+        // Add a small delay between requests (100ms)
+        await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    
+    return results;
 }
 
 // Process URLs in chunks to avoid timeouts
