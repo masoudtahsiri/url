@@ -552,32 +552,41 @@
         async function handleSubmit(event) {
             event.preventDefault();
             
-            const progressBar = document.getElementById('progress-bar');
-            const progressText = document.getElementById('progress-text');
-            const resultsDiv = document.getElementById('results');
-            const submitButton = document.querySelector('button[type="submit"]');
+            const progressBar = document.querySelector('#progressBar');
+            const progressText = document.querySelector('#progressText');
+            const resultsSection = document.querySelector('#resultsSection');
+            const submitBtn = document.querySelector('#submitBtn');
             
+            if (!progressBar || !progressText || !resultsSection || !submitBtn) {
+                console.error('Required elements not found');
+                return;
+            }
+
             progressBar.style.width = '0%';
             progressText.textContent = 'Starting...';
-            resultsDiv.innerHTML = '';
-            submitButton.disabled = true;
+            resultsSection.style.display = 'none';
+            submitBtn.disabled = true;
+            progressSection.style.display = 'block';
             
             try {
                 const formData = new FormData();
-                const fileInput = document.getElementById('file');
-                const urlInput = document.getElementById('url');
-                const urlsTextarea = document.getElementById('urls');
+                const fileInput = document.querySelector('#csvFile');
+                const urlsTextarea = document.querySelector('#urls');
+                
+                if (!fileInput || !urlsTextarea) {
+                    throw new Error('Form inputs not found');
+                }
                 
                 if (fileInput.files.length > 0) {
                     formData.append('urls', fileInput.files[0]);
-                } else if (urlInput.value) {
-                    formData.append('urls', JSON.stringify([urlInput.value]));
                 } else if (urlsTextarea.value) {
                     const urls = urlsTextarea.value
                         .split('\n')
                         .map(url => url.trim())
                         .filter(url => url);
                     formData.append('urls', JSON.stringify(urls));
+                } else {
+                    throw new Error('Please provide URLs or upload a CSV file');
                 }
 
                 async function processUrls(data, isContinuation = false) {
@@ -640,16 +649,19 @@
                                         
                                         // Display results
                                         displayResults(allResults);
+                                        resultsSection.style.display = 'block';
                                         
                                         // Enable CSV download
-                                        const csvBlob = new Blob([data.csv], { type: 'text/csv' });
-                                        const downloadUrl = URL.createObjectURL(csvBlob);
-                                        const downloadLink = document.createElement('a');
-                                        downloadLink.href = downloadUrl;
-                                        downloadLink.download = 'url_check_results.csv';
-                                        downloadLink.className = 'download-button';
-                                        downloadLink.textContent = 'Download CSV';
-                                        resultsDiv.insertBefore(downloadLink, resultsDiv.firstChild);
+                                        if (data.csv) {
+                                            const csvBlob = new Blob([data.csv], { type: 'text/csv' });
+                                            const downloadUrl = URL.createObjectURL(csvBlob);
+                                            const downloadButton = document.querySelector('#downloadButton');
+                                            if (downloadButton) {
+                                                downloadButton.href = downloadUrl;
+                                                downloadButton.download = 'url_check_results.csv';
+                                                downloadButton.style.display = 'inline-block';
+                                            }
+                                        }
                                         break;
                                     
                                     case 'error':
@@ -658,6 +670,7 @@
                             } catch (error) {
                                 console.error('Error parsing response:', error);
                                 progressText.textContent = `Error: ${error.message}`;
+                                showAlert(error.message, 'danger');
                             }
                         }
                     }
@@ -668,8 +681,9 @@
                 console.error('Error:', error);
                 progressText.textContent = `Error: ${error.message}`;
                 progressBar.style.width = '0%';
+                showAlert(error.message, 'danger');
             } finally {
-                submitButton.disabled = false;
+                submitBtn.disabled = false;
             }
         }
 
