@@ -203,23 +203,44 @@ app.post('/api/check-urls', async (req, res) => {
             const filePromise = new Promise((resolve, reject) => {
                 busboy.on('file', (name, file, info) => {
                     if (name === 'urls') {
-                        const chunks = [];
-                        file.on('data', chunk => chunks.push(chunk));
-                        file.on('end', () => {
-                            const content = Buffer.concat(chunks).toString('utf8');
-                            const results = Papa.parse(content, {
+                        let firstChunk = true;
+                        let buffer = '';
+                        let urlsToProcess = [];
+                        
+                        const processBuffer = () => {
+                            const results = Papa.parse(buffer, {
                                 header: false,
                                 skipEmptyLines: true,
-                                delimiter: ''
+                                delimiter: ',',
+                                chunk_size: 1024 * 10 // 10KB chunks
                             });
                             
-                            if (results.data.length === 0) {
-                                reject(new Error('No data found in CSV file'));
+                            const newUrls = results.data
+                                .map(row => row[0]?.trim())
+                                .filter(Boolean);
+                            
+                            if (newUrls.length > 0) {
+                                urlsToProcess.push(...newUrls);
+                            }
+                            buffer = '';
+                        };
+
+                        file.on('data', chunk => {
+                            buffer += chunk.toString('utf8');
+                            if (buffer.length > 1024 * 10) { // Process every 10KB
+                                processBuffer();
+                            }
+                        });
+
+                        file.on('end', () => {
+                            if (buffer.length > 0) {
+                                processBuffer();
+                            }
+                            if (urlsToProcess.length === 0) {
+                                reject(new Error('No valid URLs found in CSV file'));
                                 return;
                             }
-
-                            const fileUrls = results.data.map(row => row[0]?.trim()).filter(Boolean);
-                            resolve(fileUrls);
+                            resolve(urlsToProcess);
                         });
                         file.on('error', reject);
                     } else {
