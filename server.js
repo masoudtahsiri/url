@@ -342,8 +342,7 @@ app.post('/api/check-urls', async (req, res) => {
               const results = Papa.parse(content, {
                 header: false,
                 skipEmptyLines: true,
-                delimiter: '',
-                preview: 2 // Check first two rows to better determine structure
+                delimiter: ''
               });
 
               if (results.data.length === 0) {
@@ -416,25 +415,6 @@ app.post('/api/check-urls', async (req, res) => {
       return res.status(400).json({ error: 'No valid URLs provided' });
     }
 
-    // Initialize progress tracking
-    progressMap.set(progressKey, {
-      startTime: Date.now(),
-      total: urls.length,
-      processed: 0,
-      successful: 0,
-      failed: 0,
-      results: new Array(urls.length),
-      status: 'processing'
-    });
-
-    // Send initial response with progress key
-    res.json({
-      success: true,
-      message: 'Processing started',
-      progress_key: progressKey,
-      total_urls: urls.length
-    });
-
     // Process URLs in parallel with controlled concurrency
     const BATCH_SIZE = 50; // Process 50 URLs concurrently
     const results = [];
@@ -449,10 +429,15 @@ app.post('/api/check-urls', async (req, res) => {
       results.push(...batchResults);
     }
 
-    // Update final progress
-    const progress = progressMap.get(progressKey);
-    progress.status = 'complete';
-    progress.results = results;
+    // Generate CSV content
+    const csvContent = generateCsvContent(results);
+
+    // Send final response with results and CSV
+    res.json({
+      success: true,
+      results: results,
+      csv: csvContent
+    });
 
   } catch (error) {
     console.error('Error processing URLs:', error);
@@ -493,6 +478,33 @@ function findUrlColumn(headerRow, dataRow) {
     typeof cell === 'string' && 
     (cell.includes('http') || cell.includes('www.'))
   );
+}
+
+function generateCsvContent(results) {
+    const headers = ['Original URL', 'Final URL', 'Status Chain', 'Number of Redirects'];
+    const rows = results.map(result => {
+        let statusChain = [];
+        if (result.redirect_chain && result.redirect_chain.length > 0) {
+            statusChain = result.redirect_chain.map(r => r.status);
+            if (result.redirect_chain[result.redirect_chain.length - 1].final_status) {
+                statusChain.push(result.redirect_chain[result.redirect_chain.length - 1].final_status);
+            }
+        } else if (result.initial_status) {
+            statusChain = [result.initial_status];
+        }
+        
+        return [
+            result.source_url || '',
+            result.target_url || '',
+            statusChain.join(' → '),
+            result.redirect_chain ? result.redirect_chain.length : 0
+        ];
+    });
+    
+    return [headers, ...rows]
+        .map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`)
+        .join(','))
+        .join('\n');
 }
 
 // Handle OPTIONS requests

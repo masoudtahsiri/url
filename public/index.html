@@ -486,6 +486,12 @@
             
             tbody.innerHTML = '';
             
+            // Add check for undefined or null results
+            if (!results || !Array.isArray(results)) {
+                console.error('No results array provided');
+                return;
+            }
+            
             results.forEach(result => {
                 const row = tbody.insertRow();
                 let statusChain = [];
