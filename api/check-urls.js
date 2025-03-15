@@ -277,18 +277,58 @@ app.post('/api/check-urls', async (req, res) => {
             return res.status(400).json({ error: 'No valid URLs provided' });
         }
 
+        // Send initial response with total URLs
+        res.write(JSON.stringify({
+            type: 'start',
+            total_urls: urls.length
+        }) + '\n');
+
         // Process URLs in chunks
-        const results = await processUrlsInChunks(urls);
+        const results = [];
+        const chunks = [];
+        const totalUrls = urls.length;
+        
+        // Split URLs into chunks
+        for (let i = 0; i < totalUrls; i += BATCH_SIZE * MAX_CONCURRENT_BATCHES) {
+            chunks.push(urls.slice(i, i + BATCH_SIZE * MAX_CONCURRENT_BATCHES));
+        }
+        
+        let processedCount = 0;
+        
+        // Process each chunk
+        for (let i = 0; i < chunks.length; i++) {
+            const chunk = chunks[i];
+            const chunkResults = await Promise.all(
+                Array.from({ length: Math.ceil(chunk.length / BATCH_SIZE) }, (_, index) =>
+                    processBatch(chunk, index * BATCH_SIZE)
+                )
+            );
+            
+            results.push(...chunkResults.flat());
+            
+            // Update and log progress
+            processedCount += chunk.length;
+            const progress = {
+                type: 'progress',
+                processed: processedCount,
+                total: totalUrls,
+                percent: Math.round((processedCount / totalUrls) * 100)
+            };
+            res.write(JSON.stringify(progress) + '\n');
+        }
 
         // Generate CSV content
         const csvContent = generateCsvContent(results);
 
-        res.json({
+        // Send final results
+        res.end(JSON.stringify({
+            type: 'complete',
             success: true,
             results: results,
             csv: csvContent,
-            total_processed: urls.length
-        });
+            total_processed: processedCount,
+            total_urls: totalUrls
+        }));
 
     } catch (error) {
         console.error('Error processing URLs:', error);
