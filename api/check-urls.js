@@ -203,31 +203,33 @@ app.post('/api/check-urls', async (req, res) => {
             const filePromise = new Promise((resolve, reject) => {
                 busboy.on('file', (name, file, info) => {
                     if (name === 'urls') {
-                        let firstChunk = true;
                         let buffer = '';
                         let urlsToProcess = [];
                         
                         const processBuffer = () => {
-                            const results = Papa.parse(buffer, {
-                                header: false,
-                                skipEmptyLines: true,
-                                delimiter: ',',
-                                chunk_size: 1024 * 10 // 10KB chunks
-                            });
-                            
-                            const newUrls = results.data
-                                .map(row => row[0]?.trim())
-                                .filter(Boolean);
-                            
-                            if (newUrls.length > 0) {
-                                urlsToProcess.push(...newUrls);
+                            try {
+                                const results = Papa.parse(buffer, {
+                                    header: false,
+                                    skipEmptyLines: true,
+                                    delimiter: ','
+                                });
+                                
+                                const newUrls = results.data
+                                    .map(row => row[0]?.trim())
+                                    .filter(Boolean);
+                                
+                                if (newUrls.length > 0) {
+                                    urlsToProcess.push(...newUrls);
+                                }
+                                buffer = '';
+                            } catch (error) {
+                                console.error('Error parsing CSV:', error);
                             }
-                            buffer = '';
                         };
 
                         file.on('data', chunk => {
                             buffer += chunk.toString('utf8');
-                            if (buffer.length > 1024 * 10) { // Process every 10KB
+                            if (buffer.length > 1024 * 10) {
                                 processBuffer();
                             }
                         });
