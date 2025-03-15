@@ -487,7 +487,6 @@
             
             tbody.innerHTML = '';
             
-            // Add check for undefined or null results
             if (!results || !Array.isArray(results)) {
                 console.error('No results array provided');
                 return;
@@ -496,6 +495,7 @@
             results.forEach(result => {
                 const row = tbody.insertRow();
                 let statusChain = [];
+                let statusClass = '';
                 
                 // Build complete status chain including final status
                 if (result.redirect_chain && result.redirect_chain.length > 0) {
@@ -506,19 +506,36 @@
                 } else if (result.initial_status) {
                     statusChain = [result.initial_status];
                 }
+
+                // Determine status class
+                const finalStatus = statusChain[statusChain.length - 1] || 0;
+                if (result.error) {
+                    statusClass = 'text-danger';
+                } else if (finalStatus >= 200 && finalStatus < 300) {
+                    statusClass = 'text-success';
+                } else if (finalStatus >= 300 && finalStatus < 400) {
+                    statusClass = 'text-warning';
+                } else {
+                    statusClass = 'text-danger';
+                }
                 
                 // Create cells with proper URL data
-                const cells = [
-                    result.source_url || '',
-                    result.target_url || '',
-                    statusChain.join(' → '),
-                    result.redirect_chain ? result.redirect_chain.length : 0
-                ];
+                const sourceCell = row.insertCell();
+                sourceCell.textContent = result.source_url || '';
                 
-                cells.forEach(cellData => {
-                    const cell = row.insertCell();
-                    cell.textContent = cellData;
-                });
+                const targetCell = row.insertCell();
+                targetCell.textContent = result.target_url || result.source_url || '';
+                
+                const statusCell = row.insertCell();
+                statusCell.className = statusClass;
+                if (result.error) {
+                    statusCell.textContent = result.error;
+                } else {
+                    statusCell.textContent = statusChain.join(' → ') || 'Unknown';
+                }
+                
+                const redirectsCell = row.insertCell();
+                redirectsCell.textContent = result.redirect_chain ? result.redirect_chain.length : 0;
             });
             
             resultsSection.style.display = 'block';
@@ -581,6 +598,8 @@
                     throw new Error('Please provide URLs or upload a CSV file');
                 }
 
+                let allResults = [];
+
                 async function processUrls(data, isContinuation = false) {
                     const response = await fetch('/api/check-urls', {
                         method: 'POST',
@@ -595,7 +614,6 @@
                     const reader = response.body.getReader();
                     const decoder = new TextDecoder();
                     let buffer = '';
-                    let allResults = [];
 
                     while (true) {
                         const { done, value } = await reader.read();
@@ -629,6 +647,7 @@
                                         if (data.continuation) {
                                             progressText.textContent = `Processed ${data.processed}/${data.total} URLs. Starting next batch...`;
                                             allResults = allResults.concat(data.results);
+                                            displayResults(allResults); // Show intermediate results
                                             // Process next batch
                                             await processUrls(data.continuation, true);
                                         }
@@ -639,7 +658,7 @@
                                         progressText.textContent = 'Processing complete!';
                                         allResults = allResults.concat(data.results);
                                         
-                                        // Display results
+                                        // Display final results
                                         displayResults(allResults);
                                         resultsSection.style.display = 'block';
                                         
