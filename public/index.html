@@ -552,86 +552,124 @@
         async function handleSubmit(event) {
             event.preventDefault();
             
-            const formData = new FormData();
-            const fileInput = document.getElementById('csvFile');
-            const urlsInput = document.getElementById('urls');
-            const progressSection = document.getElementById('progressSection');
-            const progressBar = document.getElementById('progressBar');
-            const progressText = document.getElementById('progressText');
-            const resultsSection = document.getElementById('resultsSection');
+            const progressBar = document.getElementById('progress-bar');
+            const progressText = document.getElementById('progress-text');
+            const resultsDiv = document.getElementById('results');
+            const submitButton = document.querySelector('button[type="submit"]');
+            
+            progressBar.style.width = '0%';
+            progressText.textContent = 'Starting...';
+            resultsDiv.innerHTML = '';
+            submitButton.disabled = true;
             
             try {
-                // Reset UI elements
-                progressSection.style.display = 'block';
-                resultsSection.style.display = 'none';
-                progressBar.style.width = '0%';
-                progressBar.textContent = '';
-                progressText.textContent = 'Preparing to process URLs...';
+                const formData = new FormData();
+                const fileInput = document.getElementById('file');
+                const urlInput = document.getElementById('url');
+                const urlsTextarea = document.getElementById('urls');
                 
                 if (fileInput.files.length > 0) {
                     formData.append('urls', fileInput.files[0]);
-                } else if (urlsInput.value.trim()) {
-                    const urls = urlsInput.value.trim().split('\n').filter(url => url.trim());
+                } else if (urlInput.value) {
+                    formData.append('urls', JSON.stringify([urlInput.value]));
+                } else if (urlsTextarea.value) {
+                    const urls = urlsTextarea.value
+                        .split('\n')
+                        .map(url => url.trim())
+                        .filter(url => url);
                     formData.append('urls', JSON.stringify(urls));
-                } else {
-                    showAlert('Please provide URLs or upload a CSV file', 'danger');
-                    progressSection.style.display = 'none';
-                    return;
                 }
 
-                const response = await fetch('/api/check-urls', {
-                    method: 'POST',
-                    body: formData
-                });
+                async function processUrls(data, isContinuation = false) {
+                    const response = await fetch('/api/check-urls', {
+                        method: 'POST',
+                        body: isContinuation ? JSON.stringify({ continuation: data }) : formData,
+                        headers: isContinuation ? { 'Content-Type': 'application/json' } : {}
+                    });
 
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
 
-                const reader = response.body.getReader();
-                let totalUrls = 0;
-                const results = [];
+                    const reader = response.body.getReader();
+                    const decoder = new TextDecoder();
+                    let buffer = '';
+                    let allResults = [];
 
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-
-                    const chunk = new TextDecoder().decode(value);
-                    const lines = chunk.split('\n').filter(Boolean);
-
-                    for (const line of lines) {
-                        const data = JSON.parse(line);
+                    while (true) {
+                        const { done, value } = await reader.read();
                         
-                        switch (data.type) {
-                            case 'start':
-                                totalUrls = data.total_urls;
-                                progressText.textContent = `Processing 0 of ${totalUrls} URLs (0%)`;
-                                break;
-                            
-                            case 'progress':
-                                const percent = data.percent;
-                                progressBar.style.width = `${percent}%`;
-                                progressBar.textContent = `${percent}%`;
-                                progressText.textContent = `Processing ${data.processed} of ${data.total} URLs (${percent}%)`;
-                                break;
-                            
-                            case 'complete':
-                                displayResults(data.results);
-                                if (data.csv) {
-                                    enableDownload(data.csv);
+                        if (done) break;
+                        
+                        buffer += decoder.decode(value, { stream: true });
+                        
+                        const lines = buffer.split('\n');
+                        buffer = lines.pop() || '';
+                        
+                        for (const line of lines) {
+                            try {
+                                const data = JSON.parse(line);
+                                
+                                switch (data.type) {
+                                    case 'start':
+                                        progressText.textContent = `Processing 0/${data.total_urls} URLs...`;
+                                        break;
+                                        
+                                    case 'continuation_start':
+                                        progressText.textContent = `Continuing from ${data.start_index}/${data.total_urls} URLs...`;
+                                        break;
+                                    
+                                    case 'progress':
+                                        progressBar.style.width = `${data.percent}%`;
+                                        progressText.textContent = `Processing ${data.processed}/${data.total} URLs...`;
+                                        break;
+                                    
+                                    case 'batch_complete':
+                                        if (data.continuation) {
+                                            progressText.textContent = `Processed ${data.processed}/${data.total} URLs. Starting next batch...`;
+                                            allResults = allResults.concat(data.results);
+                                            // Process next batch
+                                            await processUrls(data.continuation, true);
+                                        }
+                                        break;
+                                    
+                                    case 'complete':
+                                        progressBar.style.width = '100%';
+                                        progressText.textContent = 'Processing complete!';
+                                        allResults = allResults.concat(data.results);
+                                        
+                                        // Display results
+                                        displayResults(allResults);
+                                        
+                                        // Enable CSV download
+                                        const csvBlob = new Blob([data.csv], { type: 'text/csv' });
+                                        const downloadUrl = URL.createObjectURL(csvBlob);
+                                        const downloadLink = document.createElement('a');
+                                        downloadLink.href = downloadUrl;
+                                        downloadLink.download = 'url_check_results.csv';
+                                        downloadLink.className = 'download-button';
+                                        downloadLink.textContent = 'Download CSV';
+                                        resultsDiv.insertBefore(downloadLink, resultsDiv.firstChild);
+                                        break;
+                                    
+                                    case 'error':
+                                        throw new Error(data.error);
                                 }
-                                progressText.textContent = `Completed: ${data.total_processed} URLs processed`;
-                                break;
+                            } catch (error) {
+                                console.error('Error parsing response:', error);
+                                progressText.textContent = `Error: ${error.message}`;
+                            }
                         }
                     }
                 }
 
+                await processUrls(null);
             } catch (error) {
                 console.error('Error:', error);
-                showAlert(error.message || 'An error occurred while processing URLs', 'danger');
-                progressText.textContent = 'Error occurred during processing';
+                progressText.textContent = `Error: ${error.message}`;
                 progressBar.style.width = '0%';
-                progressBar.textContent = '';
+            } finally {
+                submitButton.disabled = false;
             }
         }
 

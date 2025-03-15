@@ -230,53 +230,15 @@ async function processUrlsInChunks(urls, res, startIndex = 0) {
         }
     }
 
-    // If there are more URLs to process, trigger next invocation
-    if (endIndex < totalUrls) {
-        // Store remaining URLs and progress in a temporary storage
-        const remainingUrls = urls.slice(endIndex);
-        const nextInvocationData = {
-            urls: remainingUrls,
+    // Return results and continuation info
+    return {
+        results,
+        continuation: endIndex < totalUrls ? {
+            remainingUrls: urls.slice(endIndex),
             startIndex: endIndex,
             totalUrls: totalUrls
-        };
-        
-        // Trigger next invocation
-        try {
-            const response = await fetch(process.env.VERCEL_URL ? 
-                `https://${process.env.VERCEL_URL}/api/check-urls` : 
-                'http://localhost:3000/api/check-urls', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    continuation: nextInvocationData
-                })
-            });
-            
-            if (!response.ok) {
-                throw new Error('Failed to trigger next invocation');
-            }
-
-            // Stream the response from the next invocation
-            const reader = response.body.getReader();
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                res.write(new TextDecoder().decode(value));
-            }
-        } catch (error) {
-            console.error('Error triggering next invocation:', error);
-            res.write(JSON.stringify({
-                type: 'error',
-                error: 'Failed to process all URLs',
-                processed: endIndex,
-                total: totalUrls
-            }) + '\n');
-        }
-    }
-    
-    return results;
+        } : null
+    };
 }
 
 app.post('/api/check-urls', async (req, res) => {
@@ -293,9 +255,16 @@ app.post('/api/check-urls', async (req, res) => {
 
         // Check if this is a continuation of previous processing
         if (req.body.continuation) {
-            urls = req.body.continuation.urls;
+            urls = req.body.continuation.remainingUrls;
             startIndex = req.body.continuation.startIndex;
             totalUrls = req.body.continuation.totalUrls;
+            
+            // Send continuation start message
+            res.write(JSON.stringify({
+                type: 'continuation_start',
+                start_index: startIndex,
+                total_urls: totalUrls
+            }) + '\n');
         } else {
             // Handle initial request (file upload or URL input)
             if (req.headers['content-type']?.includes('multipart/form-data')) {
@@ -374,10 +343,19 @@ app.post('/api/check-urls', async (req, res) => {
         }
 
         // Process URLs for this invocation
-        const results = await processUrlsInChunks(urls, res, startIndex);
+        const { results, continuation } = await processUrlsInChunks(urls, res, startIndex);
 
-        // Only send complete response if this is the final batch
-        if (startIndex + URLS_PER_INVOCATION >= totalUrls) {
+        // Send response based on whether there's more to process
+        if (continuation) {
+            res.end(JSON.stringify({
+                type: 'batch_complete',
+                success: true,
+                results: results,
+                processed: startIndex + results.length,
+                total: totalUrls,
+                continuation: continuation
+            }));
+        } else {
             const csvContent = generateCsvContent(results);
             res.end(JSON.stringify({
                 type: 'complete',
@@ -386,14 +364,6 @@ app.post('/api/check-urls', async (req, res) => {
                 csv: csvContent,
                 total_processed: results.length,
                 total_urls: totalUrls
-            }));
-        } else {
-            // Send progress update for this batch
-            res.end(JSON.stringify({
-                type: 'batch_complete',
-                processed: startIndex + results.length,
-                total: totalUrls,
-                next_batch_start: startIndex + URLS_PER_INVOCATION
             }));
         }
 
@@ -409,7 +379,8 @@ app.post('/api/check-urls', async (req, res) => {
                 res.end(JSON.stringify({
                     type: 'error',
                     error: error.message,
-                    recoverable: true
+                    recoverable: true,
+                    processed: startIndex
                 }));
             }
         } catch (e) {
