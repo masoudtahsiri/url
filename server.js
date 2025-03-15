@@ -27,12 +27,13 @@ app.use(bodyParser.urlencoded({ extended: true, limit: '50mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Constants
-const BATCH_SIZE = 50; // Process 50 URLs at a time
-const URL_TIMEOUT = 10000; // 10 seconds per URL
+const BATCH_SIZE = 20; // Process 20 URLs at a time
+const URL_TIMEOUT = 8000; // 8 seconds per URL
 const MAX_REDIRECTS = 10;
+const MAX_CONCURRENT_BATCHES = 3; // Maximum number of concurrent batches
 
-// Function to check a single URL
-async function checkUrl(url) {
+// Function to check a single URL with retry
+async function checkUrl(url, retryCount = 0) {
     return new Promise((resolve) => {
         const startTime = Date.now();
         const originalUrl = url;
@@ -47,12 +48,15 @@ async function checkUrl(url) {
 
         function makeRequest(url, protocol) {
             if (Date.now() - startTime > URL_TIMEOUT) {
+                if (retryCount < 2) {
+                    return resolve(checkUrl(originalUrl, retryCount + 1));
+                }
                 resolve({
                     source_url: originalUrl,
                     initial_status: 0,
                     target_url: url,
                     redirect_chain: redirectChain,
-                    error: 'Request timeout',
+                    error: 'Request timeout after retries',
                     processing_time: Date.now() - startTime
                 });
                 return;
@@ -108,6 +112,9 @@ async function checkUrl(url) {
             });
 
             req.on('error', (error) => {
+                if (retryCount < 2) {
+                    return resolve(checkUrl(originalUrl, retryCount + 1));
+                }
                 resolve({
                     source_url: originalUrl,
                     initial_status: 0,
@@ -120,12 +127,15 @@ async function checkUrl(url) {
 
             req.on('timeout', () => {
                 req.destroy();
+                if (retryCount < 2) {
+                    return resolve(checkUrl(originalUrl, retryCount + 1));
+                }
                 resolve({
                     source_url: originalUrl,
                     initial_status: 0,
                     target_url: url,
                     redirect_chain: redirectChain,
-                    error: 'Request timed out',
+                    error: 'Request timed out after retries',
                     processing_time: Date.now() - startTime
                 });
             });
@@ -149,17 +159,42 @@ async function checkUrl(url) {
     });
 }
 
-// Process URLs in batches
+// Process URLs in smaller batches with controlled concurrency
 async function processBatch(urls, startIndex) {
     const batch = urls.slice(startIndex, startIndex + BATCH_SIZE);
     return Promise.all(batch.map(url => checkUrl(url)));
 }
 
-app.post('/api/check-urls', async (req, res) => {
-    // Set a longer timeout for the response
-    req.setTimeout(300000); // 5 minutes
-    res.setTimeout(300000); // 5 minutes
+// Process URLs in chunks to avoid timeouts
+async function processUrlsInChunks(urls) {
+    const results = [];
+    const chunks = [];
+    
+    // Split URLs into chunks
+    for (let i = 0; i < urls.length; i += BATCH_SIZE * MAX_CONCURRENT_BATCHES) {
+        chunks.push(urls.slice(i, i + BATCH_SIZE * MAX_CONCURRENT_BATCHES));
+    }
+    
+    // Process each chunk
+    for (let i = 0; i < chunks.length; i++) {
+        const chunk = chunks[i];
+        const chunkResults = await Promise.all(
+            Array.from({ length: Math.ceil(chunk.length / BATCH_SIZE) }, (_, index) =>
+                processBatch(chunk, index * BATCH_SIZE)
+            )
+        );
+        
+        results.push(...chunkResults.flat());
+        
+        // Log progress
+        const processed = Math.min((i + 1) * BATCH_SIZE * MAX_CONCURRENT_BATCHES, urls.length);
+        console.log(`Progress: ${processed}/${urls.length} (${Math.round((processed / urls.length) * 100)}%)`);
+    }
+    
+    return results;
+}
 
+app.post('/api/check-urls', async (req, res) => {
     try {
         let urls = [];
 
@@ -205,23 +240,8 @@ app.post('/api/check-urls', async (req, res) => {
             return res.status(400).json({ error: 'No valid URLs provided' });
         }
 
-        const results = [];
-        const totalBatches = Math.ceil(urls.length / BATCH_SIZE);
-        
-        for (let i = 0; i < urls.length; i += BATCH_SIZE) {
-            const batchResults = await processBatch(urls, i);
-            results.push(...batchResults);
-            
-            // Send progress update
-            if ((i + BATCH_SIZE) % 100 === 0 || (i + BATCH_SIZE) >= urls.length) {
-                const progress = {
-                    processed: Math.min(i + BATCH_SIZE, urls.length),
-                    total: urls.length,
-                    percent: Math.round((Math.min(i + BATCH_SIZE, urls.length) / urls.length) * 100)
-                };
-                console.log(`Progress: ${progress.processed}/${progress.total} (${progress.percent}%)`);
-            }
-        }
+        // Process URLs in chunks
+        const results = await processUrlsInChunks(urls);
 
         // Generate CSV content
         const csvContent = generateCsvContent(results);
@@ -275,7 +295,7 @@ function findUrlColumn(headerRow, dataRow) {
 }
 
 function generateCsvContent(results) {
-    const headers = ['Original URL', 'Final URL', 'Status Chain', 'Number of Redirects'];
+    const headers = ['Original URL', 'Final URL', 'Status Chain', 'Number of Redirects', 'Error', 'Processing Time (ms)'];
     const rows = results.map(result => {
         let statusChain = [];
         if (result.redirect_chain && result.redirect_chain.length > 0) {
@@ -291,7 +311,9 @@ function generateCsvContent(results) {
             result.source_url || '',
             result.target_url || '',
             statusChain.join(' → '),
-            result.redirect_chain ? result.redirect_chain.length : 0
+            result.redirect_chain ? result.redirect_chain.length : 0,
+            result.error || '',
+            result.processing_time || ''
         ];
     });
     
