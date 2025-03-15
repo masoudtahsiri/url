@@ -12,440 +12,234 @@ const http = require('http');
 const path = require('path');
 const Busboy = require('busboy');
 const Papa = require('papaparse');
+const bodyParser = require('body-parser');
 
 // Create Express app
 const app = express();
 
 // Enable CORS and compression with proper options
-app.use(cors({
-  origin: '*',
-  methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Accept'],
-  maxAge: 86400 // 24 hours
-}));
+app.use(cors());
 app.use(compression());
-
-// Configure body-parser with higher limits for large CSV files
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+app.use(bodyParser.json({ limit: '50mb' }));
+app.use(bodyParser.urlencoded({ extended: true, limit: '50mb' }));
 
 // Serve static files from the public directory
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Store progress information
-const progressMap = new Map();
+// Constants
+const BATCH_SIZE = 50; // Process 50 URLs at a time
+const URL_TIMEOUT = 10000; // 10 seconds per URL
+const MAX_REDIRECTS = 10;
 
-// Function to check URL redirects with improved error handling and timeout
-async function checkUrl(url, progressKey, index, total) {
-  return new Promise((resolve) => {
-    const startTime = Date.now();
-    const originalUrl = url;
-    
-    // Update progress at the start
-    updateProgress(progressKey, {
-      status: 'processing',
-      url: originalUrl,
-      index,
-      total,
-      startTime
-    });
+// Function to check a single URL
+async function checkUrl(url) {
+    return new Promise((resolve) => {
+        const startTime = Date.now();
+        const originalUrl = url;
+        let currentUrl = url;
 
-    // Normalize URL internally
-    let currentUrl = url;
-    if (!url.match(/^https?:\/\//i)) {
-      currentUrl = 'https://' + url;
-    }
-    
-    // Extract domain without www for comparison
-    const getDomain = (url) => {
-      try {
-        const urlObj = new URL(url);
-        return urlObj.hostname.replace(/^www\./, '');
-      } catch (e) {
-        return url;
-      }
-    };
-
-    const redirectChain = [];
-    let redirectCount = 0;
-    const PER_URL_TIMEOUT = 15000; // 15 seconds timeout per URL
-    const MAX_REDIRECTS = 15; // Increased for thorough checking
-
-    function makeRequest(url, protocol) {
-      if (Date.now() - startTime > PER_URL_TIMEOUT) {
-        const result = {
-          source_url: originalUrl,
-          initial_status: 0,
-          target_url: url,
-          redirect_chain: redirectChain,
-          error: 'Request timeout after 15 seconds',
-          processing_time: Date.now() - startTime
-        };
-
-        updateProgress(progressKey, {
-          status: 'timeout',
-          url: originalUrl,
-          index,
-          total,
-          result
-        });
-
-        resolve(result);
-        return;
-      }
-
-      const options = {
-        method: 'GET',
-        timeout: 5000, // Shorter individual request timeout
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (compatible; URLChecker/1.0)',
-          'Accept': '*/*'
+        if (!url.match(/^https?:\/\//i)) {
+            currentUrl = 'https://' + url;
         }
-      };
 
-      try {
-        const req = protocol.request(url, options, (res) => {
-          const status = res.statusCode;
-          const location = res.headers.location;
+        const redirectChain = [];
+        let redirectCount = 0;
 
-          // Handle redirects
-          if ([301, 302, 303, 307, 308].includes(status) && location && redirectCount < MAX_REDIRECTS) {
-            redirectCount++;
-            const redirectInfo = {
-              status: status,
-              url: location,
-              timestamp: Date.now(),
-              redirect_number: redirectCount
+        function makeRequest(url, protocol) {
+            if (Date.now() - startTime > URL_TIMEOUT) {
+                resolve({
+                    source_url: originalUrl,
+                    initial_status: 0,
+                    target_url: url,
+                    redirect_chain: redirectChain,
+                    error: 'Request timeout',
+                    processing_time: Date.now() - startTime
+                });
+                return;
+            }
+
+            const options = {
+                method: 'HEAD',
+                timeout: 5000,
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (compatible; URLChecker/1.0)',
+                    'Accept': '*/*'
+                }
             };
-            redirectChain.push(redirectInfo);
 
-            // Update progress for each redirect
-            updateProgress(progressKey, {
-              status: 'redirecting',
-              url: originalUrl,
-              index,
-              total,
-              redirect_count: redirectCount,
-              current_url: location
+            const req = protocol.request(url, options, (res) => {
+                const status = res.statusCode;
+                const location = res.headers.location;
+
+                if ([301, 302, 303, 307, 308].includes(status) && location && redirectCount < MAX_REDIRECTS) {
+                    redirectCount++;
+                    redirectChain.push({
+                        status: status,
+                        url: location
+                    });
+
+                    try {
+                        const nextUrl = new URL(location, url).href;
+                        const nextProtocol = nextUrl.startsWith('https:') ? https : http;
+                        makeRequest(nextUrl, nextProtocol);
+                    } catch (error) {
+                        resolve({
+                            source_url: originalUrl,
+                            initial_status: status,
+                            target_url: url,
+                            redirect_chain: redirectChain,
+                            error: `Invalid redirect URL: ${error.message}`,
+                            processing_time: Date.now() - startTime
+                        });
+                    }
+                } else {
+                    if (redirectChain.length > 0) {
+                        redirectChain[redirectChain.length - 1].final_status = status;
+                    }
+                    resolve({
+                        source_url: originalUrl,
+                        initial_status: redirectChain.length > 0 ? redirectChain[0].status : status,
+                        target_url: url,
+                        redirect_chain: redirectChain,
+                        final_status: status,
+                        processing_time: Date.now() - startTime
+                    });
+                }
             });
 
-            try {
-              const nextUrl = new URL(location, url).href;
-              const nextProtocol = nextUrl.startsWith('https:') ? https : http;
-              makeRequest(nextUrl, nextProtocol);
-            } catch (error) {
-              const result = {
+            req.on('error', (error) => {
+                resolve({
+                    source_url: originalUrl,
+                    initial_status: 0,
+                    target_url: url,
+                    redirect_chain: redirectChain,
+                    error: error.message,
+                    processing_time: Date.now() - startTime
+                });
+            });
+
+            req.on('timeout', () => {
+                req.destroy();
+                resolve({
+                    source_url: originalUrl,
+                    initial_status: 0,
+                    target_url: url,
+                    redirect_chain: redirectChain,
+                    error: 'Request timed out',
+                    processing_time: Date.now() - startTime
+                });
+            });
+
+            req.end();
+        }
+
+        try {
+            const protocol = currentUrl.startsWith('https:') ? https : http;
+            makeRequest(currentUrl, protocol);
+        } catch (error) {
+            resolve({
                 source_url: originalUrl,
-                initial_status: status,
+                initial_status: 0,
                 target_url: url,
-                redirect_chain: redirectChain,
-                error: `Invalid redirect URL: ${error.message}`,
+                redirect_chain: [],
+                error: `Invalid URL: ${error.message}`,
                 processing_time: Date.now() - startTime
-              };
-
-              updateProgress(progressKey, {
-                status: 'error',
-                url: originalUrl,
-                index,
-                total,
-                result
-              });
-
-              resolve(result);
-            }
-          } else {
-            // Final response
-            if (redirectChain.length > 0) {
-              redirectChain[redirectChain.length - 1].final_status = status;
-            }
-
-            const result = {
-              source_url: originalUrl,
-              initial_status: redirectChain.length > 0 ? redirectChain[0].status : status,
-              target_url: url,
-              redirect_chain: redirectChain,
-              final_status: status,
-              processing_time: Date.now() - startTime,
-              error: ''
-            };
-
-            updateProgress(progressKey, {
-              status: 'complete',
-              url: originalUrl,
-              index,
-              total,
-              result
             });
+        }
+    });
+}
 
-            resolve(result);
-          }
-        });
+// Process URLs in batches
+async function processBatch(urls, startIndex) {
+    const batch = urls.slice(startIndex, startIndex + BATCH_SIZE);
+    return Promise.all(batch.map(url => checkUrl(url)));
+}
 
-        req.on('error', (error) => {
-          const result = {
-            source_url: originalUrl,
-            initial_status: 0,
-            target_url: url,
-            redirect_chain: redirectChain,
-            error: error.message,
-            processing_time: Date.now() - startTime
-          };
-
-          updateProgress(progressKey, {
-            status: 'error',
-            url: originalUrl,
-            index,
-            total,
-            result
-          });
-
-          resolve(result);
-        });
-
-        req.on('timeout', () => {
-          req.destroy();
-          const result = {
-            source_url: originalUrl,
-            initial_status: 0,
-            target_url: url,
-            redirect_chain: redirectChain,
-            error: 'Request timed out',
-            processing_time: Date.now() - startTime
-          };
-
-          updateProgress(progressKey, {
-            status: 'timeout',
-            url: originalUrl,
-            index,
-            total,
-            result
-          });
-
-          resolve(result);
-        });
-
-        req.end();
-      } catch (error) {
-        const result = {
-          source_url: originalUrl,
-          initial_status: 0,
-          target_url: url,
-          redirect_chain: [],
-          error: `Invalid URL: ${error.message}`,
-          processing_time: Date.now() - startTime
-        };
-
-        updateProgress(progressKey, {
-          status: 'error',
-          url: originalUrl,
-          index,
-          total,
-          result
-        });
-
-        resolve(result);
-      }
-    }
+app.post('/api/check-urls', async (req, res) => {
+    // Set a longer timeout for the response
+    req.setTimeout(300000); // 5 minutes
+    res.setTimeout(300000); // 5 minutes
 
     try {
-      const protocol = currentUrl.startsWith('https:') ? https : http;
-      makeRequest(currentUrl, protocol);
-    } catch (error) {
-      const result = {
-        source_url: originalUrl,
-        initial_status: 0,
-        target_url: url,
-        redirect_chain: [],
-        error: `Invalid URL: ${error.message}`,
-        processing_time: Date.now() - startTime
-      };
+        let urls = [];
 
-      updateProgress(progressKey, {
-        status: 'error',
-        url: originalUrl,
-        index,
-        total,
-        result
-      });
+        if (req.headers['content-type']?.includes('multipart/form-data')) {
+            const busboy = Busboy({ headers: req.headers });
+            const filePromise = new Promise((resolve, reject) => {
+                busboy.on('file', (name, file, info) => {
+                    if (name === 'urls') {
+                        const chunks = [];
+                        file.on('data', chunk => chunks.push(chunk));
+                        file.on('end', () => {
+                            const content = Buffer.concat(chunks).toString('utf8');
+                            const results = Papa.parse(content, {
+                                header: false,
+                                skipEmptyLines: true,
+                                delimiter: ''
+                            });
+                            
+                            if (results.data.length === 0) {
+                                reject(new Error('No data found in CSV file'));
+                                return;
+                            }
 
-      resolve(result);
-    }
-  });
-}
-
-// Function to update progress
-function updateProgress(key, data) {
-  if (!progressMap.has(key)) {
-    progressMap.set(key, {
-      startTime: Date.now(),
-      total: data.total,
-      processed: 0,
-      successful: 0,
-      failed: 0,
-      results: [],
-      status: 'processing'
-    });
-  }
-
-  const progress = progressMap.get(key);
-
-  if (data.status === 'complete') {
-    progress.processed++;
-    progress.successful++;
-    progress.results[data.index] = data.result;
-  } else if (data.status === 'error' || data.status === 'timeout') {
-    progress.processed++;
-    progress.failed++;
-    progress.results[data.index] = data.result;
-  }
-
-  progress.percent_complete = Math.round((progress.processed / progress.total) * 100);
-  progress.estimated_time_remaining = estimateTimeRemaining(progress);
-
-  // Clean up old progress data after 1 hour
-  setTimeout(() => {
-    progressMap.delete(key);
-  }, 3600000);
-}
-
-// Function to estimate remaining time
-function estimateTimeRemaining(progress) {
-  if (progress.processed === 0) return 'Calculating...';
-  
-  const elapsed = Date.now() - progress.startTime;
-  const timePerUrl = elapsed / progress.processed;
-  const remaining = progress.total - progress.processed;
-  const estimatedMs = timePerUrl * remaining;
-  
-  if (estimatedMs < 60000) return Math.round(estimatedMs / 1000) + ' seconds';
-  return Math.round(estimatedMs / 60000) + ' minutes';
-}
-
-// Handle URL checking with improved CSV handling
-app.post('/api/check-urls', async (req, res) => {
-  try {
-    let urls = [];
-    const progressKey = Date.now().toString();
-
-    // Handle file upload
-    if (req.headers['content-type'] && req.headers['content-type'].includes('multipart/form-data')) {
-      const busboy = Busboy({ headers: req.headers });
-      const filePromise = new Promise((resolve, reject) => {
-        busboy.on('file', (name, file, info) => {
-          if (name === 'urls') {
-            const chunks = [];
-            file.on('data', chunk => chunks.push(chunk));
-            file.on('end', () => {
-              const content = Buffer.concat(chunks).toString('utf8');
-              
-              // Flexible CSV parsing
-              const results = Papa.parse(content, {
-                header: false,
-                skipEmptyLines: true,
-                delimiter: ''
-              });
-
-              if (results.data.length === 0) {
-                reject(new Error('No data found in CSV file'));
-                return;
-              }
-
-              // Smart URL extraction
-              let fileUrls;
-              if (results.data[0].length === 1) {
-                // Single column
-                fileUrls = results.data.map(row => row[0]);
-              } else {
-                // Find URL column
-                const urlColumnIndex = findUrlColumn(results.data[0], results.data[1]);
-                if (urlColumnIndex === -1) {
-                  // Try finding URLs in any column
-                  fileUrls = results.data.map(row => {
-                    const urlCell = row.find(cell => 
-                      cell && 
-                      typeof cell === 'string' && 
-                      (cell.includes('http') || cell.includes('www') || !cell.includes(','))
-                    );
-                    return urlCell || '';
-                  });
-                } else {
-                  fileUrls = results.data.map(row => row[urlColumnIndex]);
-                }
-              }
-
-              // Clean and validate URLs
-              fileUrls = fileUrls
-                .filter(url => url && url.trim())
-                .map(url => url.trim());
-
-              if (fileUrls.length === 0) {
-                reject(new Error('No valid URLs found in the CSV file'));
-                return;
-              }
-
-              resolve(fileUrls);
+                            const fileUrls = results.data.map(row => row[0]?.trim()).filter(Boolean);
+                            resolve(fileUrls);
+                        });
+                        file.on('error', reject);
+                    } else {
+                        file.resume();
+                    }
+                });
+                busboy.on('error', reject);
+                req.pipe(busboy);
             });
-            file.on('error', reject);
-          } else {
-            file.resume();
-          }
+
+            urls = await filePromise;
+        } else if (req.body.urls) {
+            urls = Array.isArray(req.body.urls) ? req.body.urls : [req.body.urls];
+            urls = urls.filter(url => url && url.trim());
+        }
+
+        if (urls.length === 0) {
+            return res.status(400).json({ error: 'No valid URLs provided' });
+        }
+
+        const results = [];
+        const totalBatches = Math.ceil(urls.length / BATCH_SIZE);
+        
+        for (let i = 0; i < urls.length; i += BATCH_SIZE) {
+            const batchResults = await processBatch(urls, i);
+            results.push(...batchResults);
+            
+            // Send progress update
+            if ((i + BATCH_SIZE) % 100 === 0 || (i + BATCH_SIZE) >= urls.length) {
+                const progress = {
+                    processed: Math.min(i + BATCH_SIZE, urls.length),
+                    total: urls.length,
+                    percent: Math.round((Math.min(i + BATCH_SIZE, urls.length) / urls.length) * 100)
+                };
+                console.log(`Progress: ${progress.processed}/${progress.total} (${progress.percent}%)`);
+            }
+        }
+
+        // Generate CSV content
+        const csvContent = generateCsvContent(results);
+
+        res.json({
+            success: true,
+            results: results,
+            csv: csvContent,
+            total_processed: urls.length
         });
-        busboy.on('error', reject);
-        req.pipe(busboy);
-      });
 
-      try {
-        urls = await filePromise;
-      } catch (error) {
-        return res.status(400).json({ error: 'Error processing uploaded file: ' + error.message });
-      }
-    } else if (req.body.urls) {
-      if (!Array.isArray(req.body.urls)) {
-        return res.status(400).json({ error: 'URLs must be provided as an array' });
-      }
-      urls = req.body.urls.filter(url => url && url.trim());
-    } else if (req.body.url) {
-      urls = [req.body.url];
+    } catch (error) {
+        console.error('Error processing URLs:', error);
+        res.status(500).json({
+            error: 'Internal Server Error',
+            message: error.message
+        });
     }
-
-    // Clean and validate URLs
-    urls = urls.filter(url => url && url.trim());
-
-    if (urls.length === 0) {
-      return res.status(400).json({ error: 'No valid URLs provided' });
-    }
-
-    // Process URLs in parallel with controlled concurrency
-    const BATCH_SIZE = 50; // Process 50 URLs concurrently
-    const results = [];
-    
-    for (let i = 0; i < urls.length; i += BATCH_SIZE) {
-      const batch = urls.slice(i, i + BATCH_SIZE);
-      const batchResults = await Promise.all(
-        batch.map((url, batchIndex) => 
-          checkUrl(url, progressKey, i + batchIndex, urls.length)
-        )
-      );
-      results.push(...batchResults);
-    }
-
-    // Generate CSV content
-    const csvContent = generateCsvContent(results);
-
-    // Send final response with results and CSV
-    res.json({
-      success: true,
-      results: results,
-      csv: csvContent
-    });
-
-  } catch (error) {
-    console.error('Error processing URLs:', error);
-    res.status(500).json({
-      error: 'Internal Server Error',
-      message: error.message || 'An unexpected error occurred while processing URLs'
-    });
-  }
 });
 
 // Add progress checking endpoint
