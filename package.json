@@ -16,7 +16,8 @@
     "compression": "^1.7.4",
     "busboy": "^1.6.0",
     "papaparse": "^5.4.1",
-    "vary": "^1.1.2"
+    "vary": "^1.1.2",
+    "body-parser": "^1.20.2"
   },
   "devDependencies": {
     "nodemon": "^3.0.3"
