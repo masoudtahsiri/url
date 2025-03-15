@@ -33,6 +33,9 @@ const MAX_REDIRECTS = 10;
 const MAX_CONCURRENT_BATCHES = 3; // Maximum number of concurrent batches
 const CHUNK_SIZE = 30; // Process 30 URLs at a time to stay within Vercel limits
 
+// Shared counter for progress tracking
+let globalProcessedCount = 0;
+
 // Function to check a single URL with retry
 async function checkUrl(url, retryCount = 0) {
     return new Promise((resolve) => {
@@ -161,7 +164,7 @@ async function checkUrl(url, retryCount = 0) {
 }
 
 // Process URLs in smaller batches with controlled concurrency
-async function processBatch(urls, startIndex, res, totalUrls, processedSoFar = 0) {
+async function processBatch(urls, startIndex, res, totalUrls) {
     const batch = urls.slice(startIndex, startIndex + BATCH_SIZE);
     const results = [];
     
@@ -171,13 +174,13 @@ async function processBatch(urls, startIndex, res, totalUrls, processedSoFar = 0
             const result = await checkUrl(url);
             results.push(result);
             
-            // Update progress after each URL
-            processedSoFar++;
+            // Update progress after each URL using the global counter
+            globalProcessedCount++;
             const progress = {
                 type: 'progress',
-                processed: processedSoFar,
+                processed: globalProcessedCount,
                 total: totalUrls,
-                percent: Math.round((processedSoFar / totalUrls) * 100)
+                percent: Math.round((globalProcessedCount / totalUrls) * 100)
             };
             res.write(JSON.stringify(progress) + '\n');
             
@@ -195,14 +198,16 @@ async function processBatch(urls, startIndex, res, totalUrls, processedSoFar = 0
         }
     }
     
-    return { results, processedSoFar };
+    return results;
 }
 
 // Process URLs in chunks to avoid timeouts
 async function processUrlsInChunks(urls, res) {
     const results = [];
     const totalUrls = urls.length;
-    let processedSoFar = 0;
+    
+    // Reset global counter at the start of processing
+    globalProcessedCount = 0;
     
     // Process in smaller chunks to avoid timeouts
     for (let i = 0; i < totalUrls; i += CHUNK_SIZE) {
@@ -212,15 +217,14 @@ async function processUrlsInChunks(urls, res) {
         // Process each batch in the chunk
         for (let j = 0; j < chunk.length; j += BATCH_SIZE) {
             chunkPromises.push(
-                processBatch(chunk, j, res, totalUrls, processedSoFar + j)
+                processBatch(chunk, j, res, totalUrls)
             );
         }
         
         try {
             const chunkResults = await Promise.all(chunkPromises);
-            for (const { results: batchResults, processedSoFar: batchProcessed } of chunkResults) {
+            for (const batchResults of chunkResults) {
                 results.push(...batchResults);
-                processedSoFar = Math.max(processedSoFar, batchProcessed);
             }
         } catch (error) {
             console.error('Error processing chunk:', error);
@@ -232,6 +236,9 @@ async function processUrlsInChunks(urls, res) {
 }
 
 app.post('/api/check-urls', async (req, res) => {
+    // Reset global counter at the start of each request
+    globalProcessedCount = 0;
+    
     try {
         let urls = [];
 
