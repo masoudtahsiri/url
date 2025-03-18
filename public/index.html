@@ -636,14 +636,24 @@
                 
                 if (fileInput.files.length > 0) {
                     console.log('Using CSV file upload');
-                    formData.append('urls', fileInput.files[0]);
+                    const csvFile = fileInput.files[0];
+                    // Directly append the file to formData
+                    formData.append('urls', csvFile);
+                    // Log the file properties for debugging
+                    console.log('File info:', {
+                        name: csvFile.name,
+                        size: csvFile.size,
+                        type: csvFile.type
+                    });
+
+                    // For multipart form data, don't set custom Content-Type header
+                    // The browser will set the correct boundary
                 } else if (urlsTextarea.value) {
                     console.log('Using manually entered URLs');
                     urls = urlsTextarea.value
                         .split('\n')
                         .map(url => url.trim())
                         .filter(url => url);
-                    formData.append('urls', JSON.stringify(urls));
                     isManualUrls = true;
                 } else {
                     throw new Error('Please provide URLs or upload a CSV file');
@@ -658,7 +668,7 @@
                     
                     if (isInitial) {
                         if (isManualUrls) {
-                            // For manual URLs, send as JSON directly instead of FormData
+                            // For manual URLs, send as JSON directly
                             requestBody = JSON.stringify({
                                 urls: requestData,
                                 manual: true
@@ -666,11 +676,12 @@
                             headers = {
                                 'Content-Type': 'application/json'
                             };
-                            console.log('Sending manual URLs as JSON:', requestBody);
+                            console.log('Sending manual URLs as JSON');
                         } else {
-                            // For file upload, use FormData as before
+                            // For file upload, use FormData without setting Content-Type
                             requestBody = formData;
-                            console.log('Sending CSV file via FormData');
+                            console.log('Sending CSV file via FormData - browser will set correct multipart boundary');
+                            // DO NOT set Content-Type for FormData - browser will set it with boundary
                         }
                     } else {
                         // Make sure requestData is an array
@@ -698,8 +709,42 @@
                         headers: headers
                     });
 
+                    console.log('Response status:', response.status, response.statusText);
                     if (!response.ok) {
-                        throw new Error(`HTTP error! status: ${response.status}`);
+                        throw new Error(`HTTP error! status: ${response.status} ${response.statusText}`);
+                    }
+
+                    // Check if the response has content
+                    const contentType = response.headers.get('Content-Type');
+                    console.log('Response Content-Type:', contentType);
+
+                    // Check for empty response before streaming
+                    if (contentType && contentType.includes('application/json')) {
+                        try {
+                            const jsonResponse = await response.json();
+                            console.log('Direct JSON response:', jsonResponse);
+                            // Extract the same data we would get from streaming
+                            return {
+                                batchResults: jsonResponse.results || [],
+                                hasMore: jsonResponse.has_more || false,
+                                nextIndex: jsonResponse.next_index || 0,
+                                totalUrls: jsonResponse.total_count || 0,
+                                responseUrls: jsonResponse.urls || []
+                            };
+                        } catch (e) {
+                            console.log('Failed to parse JSON, falling back to streaming');
+                            // Fall back to streaming approach
+                            // Need to request again since we've consumed the response
+                            const newResponse = await fetch('/api/check-urls', {
+                                method: 'POST',
+                                body: requestBody,
+                                headers: headers
+                            });
+                            if (!newResponse.ok) {
+                                throw new Error(`HTTP error in retry! status: ${newResponse.status}`);
+                            }
+                            response = newResponse;
+                        }
                     }
 
                     const reader = response.body.getReader();
@@ -720,6 +765,24 @@
                         if (done) {
                             console.log('Stream reading complete for this batch');
                             console.log('Final buffer content:', buffer);
+                            
+                            // Check for empty buffer
+                            if (!buffer.trim()) {
+                                console.error('Empty response received from server');
+                                if (isInitial) {
+                                    showAlert('The server returned an empty response. Please check your CSV file format and try again.', 'danger');
+                                    throw new Error('Empty response from server');
+                                } else {
+                                    // If not the first batch, return empty results but don't error
+                                    return {
+                                        batchResults: [], 
+                                        hasMore: false, 
+                                        nextIndex: startIndex, 
+                                        totalUrls: totalUrls,
+                                        responseUrls: []
+                                    };
+                                }
+                            }
                             
                             // Process any remaining data in the buffer
                             if (buffer.trim()) {
@@ -801,6 +864,24 @@
                 let totalUrls = 0;
                 let allUrlsData = urls;
                 
+                // Check if the CSV file is valid
+                if (!isManualUrls && fileInput.files.length > 0) {
+                    const csvFile = fileInput.files[0];
+                    // Check file type
+                    if (!csvFile.name.toLowerCase().endsWith('.csv') && 
+                        csvFile.type !== 'text/csv' && 
+                        csvFile.type !== 'application/vnd.ms-excel') {
+                        showAlert('Please upload a valid CSV file. The file should have a .csv extension and contain a list of URLs.', 'danger');
+                        throw new Error('Invalid file type. Please upload a CSV file.');
+                    }
+                    
+                    // Check file size
+                    if (csvFile.size === 0) {
+                        showAlert('The uploaded CSV file is empty. Please upload a file with URLs to check.', 'danger');
+                        throw new Error('Empty CSV file');
+                    }
+                }
+                
                 while (hasMore) {
                     if (totalUrls > 0) {
                         console.log(`Starting batch from index ${startIndex}/${totalUrls}`);
@@ -818,6 +899,16 @@
                         );
                         
                         const { batchResults, hasMore: moreResults, nextIndex, totalUrls: total, responseUrls } = batchResult;
+                        
+                        // Check if we received valid results
+                        if (!batchResults || batchResults.length === 0) {
+                            console.warn('No results received in this batch');
+                            if (isInitial) {
+                                // This is the first batch and no results, likely a problem
+                                showAlert('No results were returned. Please check your CSV file format or URL input.', 'warning');
+                                hasMore = false; // Stop processing
+                            }
+                        }
                         
                         // Update state for next batch
                         allResults = [...allResults, ...batchResults];
