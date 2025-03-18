@@ -334,9 +334,6 @@ app.post('/api/check-urls', async (req, res) => {
 
             totalUrls = urls.length;
             
-            // Reset the global counter for a new request
-            globalProcessedCount = 0;
-            
             // Send initial response with total URLs
             res.write(JSON.stringify({
                 type: 'start',
@@ -348,36 +345,24 @@ app.post('/api/check-urls', async (req, res) => {
         // Process URLs for this invocation
         const { results, continuation } = await processUrlsInChunks(urls, res, startIndex);
 
-        // Ensure each result has the correct structure
-        const formattedResults = results.map(result => {
-            // Ensure redirect_chain is always an array
-            if (!result.redirect_chain) {
-                result.redirect_chain = [];
-            }
-            // Ensure source_url and target_url are always set
-            result.source_url = result.source_url || '';
-            result.target_url = result.target_url || result.source_url || '';
-            return result;
-        });
-
         // Send response based on whether there's more to process
         if (continuation) {
             res.end(JSON.stringify({
                 type: 'batch_complete',
                 success: true,
-                results: formattedResults,
-                processed: startIndex + formattedResults.length,
+                results: results,
+                processed: startIndex + results.length,
                 total: totalUrls,
                 continuation: continuation
             }));
         } else {
-            const csvContent = generateCsvContent(formattedResults);
+            const csvContent = generateCsvContent(results);
             res.end(JSON.stringify({
                 type: 'complete',
                 success: true,
-                results: formattedResults,
+                results: results,
                 csv: csvContent,
-                total_processed: formattedResults.length,
+                total_processed: results.length,
                 total_urls: totalUrls
             }));
         }
