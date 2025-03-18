@@ -558,6 +558,42 @@
             downloadButton.style.display = 'inline-block';
         }
 
+        // Helper function to generate CSV content from all results
+        function generateCompleteCsv(results) {
+            console.log(`Generating complete CSV for ${results.length} results`);
+            
+            // Define CSV headers
+            const headers = ['Original URL', 'Final URL', 'Status Chain', 'Number of Redirects', 'Error', 'Processing Time (ms)'];
+            
+            // Map results to CSV rows
+            const rows = results.map(result => {
+                let statusChain = [];
+                if (result.redirect_chain && result.redirect_chain.length > 0) {
+                    statusChain = result.redirect_chain.map(r => r.status);
+                    if (result.redirect_chain[result.redirect_chain.length - 1].final_status) {
+                        statusChain.push(result.redirect_chain[result.redirect_chain.length - 1].final_status);
+                    }
+                } else if (result.initial_status) {
+                    statusChain = [result.initial_status];
+                }
+                
+                return [
+                    result.source_url || '',
+                    result.target_url || '',
+                    statusChain.join(' → '),
+                    result.redirect_chain ? result.redirect_chain.length : 0,
+                    result.error || '',
+                    result.processing_time || ''
+                ];
+            });
+            
+            // Convert to CSV format
+            return [headers, ...rows]
+                .map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`)
+                .join(','))
+                .join('\n');
+        }
+
         async function handleSubmit(event) {
             event.preventDefault();
             
@@ -584,7 +620,6 @@
             
             // Store all accumulated results
             let allResults = [];
-            let csvContent = '';
             
             try {
                 // Prepare initial request data
@@ -662,7 +697,8 @@
                                         
                                         // If this is the final batch, accumulate the CSV
                                         if (data.type === 'complete') {
-                                            csvContent = data.csv;
+                                            // We no longer need this as we'll generate the CSV client-side
+                                            // csvContent = data.csv;
                                         }
                                         
                                         console.log(`Batch ${data.type} - received ${data.results?.length || 0} results, next index: ${nextIndex}, has more: ${hasMore}`);
@@ -755,10 +791,11 @@
                 displayResults(allResults);
                 resultsSection.style.display = 'block';
                 
-                // Enable CSV download if we have results
+                // Generate and enable CSV download if we have results
                 if (allResults.length > 0) {
-                    console.log('Enabling CSV download');
-                    enableDownload(csvContent);
+                    console.log('Generating complete CSV and enabling download');
+                    const completeCsv = generateCompleteCsv(allResults);
+                    enableDownload(completeCsv);
                 }
                 
             } catch (error) {
