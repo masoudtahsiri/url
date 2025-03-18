@@ -32,6 +32,7 @@ const URL_TIMEOUT = 8000; // 8 seconds per URL
 const MAX_REDIRECTS = 10;
 const MAX_CONCURRENT_BATCHES = 3; // Maximum number of concurrent batches
 const URLS_PER_REQUEST = 100; // Number of URLs to process per serverless function invocation
+const URL_REQUEST_DELAY = 500; // Delay between URL requests in milliseconds to avoid rate limiting (429 errors)
 
 // Shared counter for progress tracking
 let globalProcessedCount = 0;
@@ -170,7 +171,7 @@ async function processBatch(urls, startIndex, res, totalUrls, processedSoFar = 0
     const results = [];
     let localProcessed = 0;
     
-    // Process URLs one by one with a small delay between them
+    // Process URLs one by one with a delay between them
     for (const url of batch) {
         try {
             const result = await checkUrl(url);
@@ -190,8 +191,8 @@ async function processBatch(urls, startIndex, res, totalUrls, processedSoFar = 0
                 res.write(JSON.stringify(progress) + '\n');
             }
             
-            // Add a small delay between requests (100ms)
-            await new Promise(resolve => setTimeout(resolve, 100));
+            // Add a delay between URL requests to avoid rate limiting (429 errors)
+            await new Promise(resolve => setTimeout(resolve, URL_REQUEST_DELAY));
         } catch (error) {
             console.error(`Error processing URL ${url}:`, error);
             results.push({
@@ -202,6 +203,9 @@ async function processBatch(urls, startIndex, res, totalUrls, processedSoFar = 0
                 error: 'Processing failed'
             });
             localProcessed++;
+            
+            // Add the same delay after errors to maintain consistent timing
+            await new Promise(resolve => setTimeout(resolve, URL_REQUEST_DELAY));
         }
     }
     
