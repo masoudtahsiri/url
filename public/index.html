@@ -223,7 +223,7 @@
         }
         
         #progressPercent {
-            color: white;
+            transition: color 0.2s;
             text-shadow: 0 0 2px rgba(0, 0, 0, 0.5);
         }
 
@@ -497,6 +497,13 @@
             }
             if (progressPercent) {
                 progressPercent.textContent = `${percent}%`;
+                
+                // Change color based on whether progress bar has reached the center
+                if (percent >= 50) {
+                    progressPercent.style.color = "white"; // White text on green background
+                } else {
+                    progressPercent.style.color = "black"; // Black text on empty background
+                }
             }
         }
 
@@ -634,6 +641,10 @@
             );
             
             if (progressBar) progressBar.style.width = '0%';
+            if (progressPercent) {
+                progressPercent.textContent = '0%';
+                progressPercent.style.color = 'black'; // Ensure initial color is black
+            }
             updateProgressMessage('Processing...');
             if (resultsSection) resultsSection.style.display = 'none';
             if (submitBtn) submitBtn.disabled = true;
