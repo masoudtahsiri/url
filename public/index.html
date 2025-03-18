@@ -471,15 +471,21 @@
             }, 5000);
         }
 
-        function updateProgress(current, total) {
-            if (!progressBar || !processedUrls || !totalUrls) {
-                console.error('Progress elements not found');
-                return;
+        function updateElement(id, value) {
+            const element = document.getElementById(id);
+            if (element) {
+                element.textContent = value;
+            } else {
+                console.warn(`Element with ID '${id}' not found when trying to set value: ${value}`);
             }
-            const percentage = (current / total) * 100;
-            progressBar.style.width = `${percentage}%`;
-            processedUrls.textContent = current;
-            totalUrls.textContent = total;
+        }
+
+        function updateProgressBar(percent) {
+            const progressBar = document.getElementById('progressBar');
+            if (progressBar) {
+                progressBar.style.width = `${percent}%`;
+            }
+            updateElement('progressPercent', `${percent}%`);
         }
 
         function displayResults(results) {
@@ -831,18 +837,17 @@
                                 
                                 switch (data.type) {
                                     case 'batch_start':
-                                        progressText.textContent = `Processing URLs ${data.start_index}/${data.total_urls}...`;
+                                        updateElement('progressText', `Processing URLs ${data.start_index}/${data.total_urls}...`);
                                         totalUrls = data.total_urls;
-                                        document.getElementById('totalUrls').textContent = data.total_urls;
+                                        updateElement('totalUrls', data.total_urls);
                                         break;
                                     
                                     case 'progress':
                                         const percent = data.percent;
-                                        progressBar.style.width = `${percent}%`;
-                                        document.getElementById('progressPercent').textContent = `${percent}%`;
-                                        progressText.textContent = `Processing ${data.processed}/${data.total} URLs...`;
-                                        document.getElementById('processedUrls').textContent = data.processed;
-                                        document.getElementById('totalUrls').textContent = data.total;
+                                        updateProgressBar(percent);
+                                        updateElement('progressText', `Processing ${data.processed}/${data.total} URLs...`);
+                                        updateElement('processedUrls', data.processed);
+                                        updateElement('totalUrls', data.total);
                                         break;
                                     
                                     case 'error':
@@ -850,7 +855,7 @@
                                 }
                             } catch (error) {
                                 console.error('Error parsing response:', error, 'Line:', line);
-                                progressText.textContent = `Error: ${error.message}`;
+                                updateElement('progressText', `Error: ${error.message}`);
                                 showAlert(error.message, 'danger');
                             }
                         }
@@ -893,12 +898,12 @@
                 while (hasMore) {
                     if (totalUrls > 0) {
                         console.log(`Starting batch from index ${startIndex}/${totalUrls}`);
-                        progressText.textContent = `Starting batch processing`;
-                        document.getElementById('processedUrls').textContent = startIndex;
-                        document.getElementById('totalUrls').textContent = totalUrls;
+                        updateElement('progressText', `Starting batch processing`);
+                        updateElement('processedUrls', startIndex);
+                        updateElement('totalUrls', totalUrls);
                     } else {
                         console.log(`Starting batch from index ${startIndex}`);
-                        progressText.textContent = `Processing`;
+                        updateElement('progressText', `Processing`);
                     }
                     
                     try {
@@ -932,12 +937,11 @@
                         
                         // Update progress
                         const percentComplete = Math.min(100, Math.round((startIndex / totalUrls) * 100));
-                        progressBar.style.width = `${percentComplete}%`;
-                        document.getElementById('progressPercent').textContent = `${percentComplete}%`;
-                        progressText.textContent = `Processed ${allResults.length}/${totalUrls} URLs (${percentComplete}%)`;
+                        updateProgressBar(percentComplete);
+                        updateElement('progressText', `Processed ${allResults.length}/${totalUrls} URLs (${percentComplete}%)`);
                     } catch (error) {
                         console.error('Batch processing error:', error);
-                        progressText.textContent = `Error processing batch: ${error.message}`;
+                        updateElement('progressText', `Error processing batch: ${error.message}`);
                         showAlert(`Error processing batch: ${error.message}. The process has been stopped.`, 'danger');
                         hasMore = false; // Stop processing on error
                     }
@@ -945,9 +949,8 @@
                 
                 // All batches completed - display results
                 console.log(`All batches complete. Total results: ${allResults.length}/${totalUrls}`);
-                progressBar.style.width = '100%';
-                document.getElementById('progressPercent').textContent = '100%';
-                progressText.textContent = `Processing complete! Processed ${allResults.length}/${totalUrls} URLs`;
+                updateProgressBar(100);
+                updateElement('progressText', `Processing complete! Processed ${allResults.length}/${totalUrls} URLs`);
                 
                 // Display results
                 displayResults(allResults);
@@ -962,8 +965,8 @@
                 
             } catch (error) {
                 console.error('Error:', error);
-                progressText.textContent = `Error: ${error.message}`;
-                progressBar.style.width = '0%';
+                updateElement('progressText', `Error: ${error.message}`);
+                updateProgressBar(0);
                 showAlert(error.message, 'danger');
             } finally {
                 submitBtn.disabled = false;
