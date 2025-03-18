@@ -649,8 +649,8 @@
                     throw new Error('Please provide URLs or upload a CSV file');
                 }
                 
-                // Process URLs in batches
-                async function processUrlsBatch(requestData, startIndex = 0, isInitial = true) {
+                // Process a single batch of URLs
+                async function processSingleBatch(requestData, startIndex = 0, isInitial = true) {
                     console.log(`Processing batch starting at index ${startIndex} (initial: ${isInitial})`);
                     
                     let requestBody;
@@ -673,15 +673,23 @@
                             console.log('Sending CSV file via FormData');
                         }
                     } else {
-                        // Continuation requests remain the same
+                        // Make sure requestData is an array
+                        console.log('Continuation request data type:', typeof requestData);
+                        
+                        // For continuation requests, always use JSON
                         requestBody = JSON.stringify({
                             continuation: true,
-                            urls: requestData,
+                            urls: Array.isArray(requestData) ? requestData : [],
                             startIndex: startIndex
                         });
                         headers = {
                             'Content-Type': 'application/json'
                         };
+                        console.log('Sending continuation request:', JSON.stringify({
+                            continuation: true,
+                            startIndex: startIndex,
+                            urlsLength: Array.isArray(requestData) ? requestData.length : 0
+                        }));
                     }
                     
                     const response = await fetch('/api/check-urls', {
@@ -702,7 +710,7 @@
                     let totalUrls = 0;
                     let nextIndex = 0;
                     let hasMore = false;
-                    let urls = [];
+                    let responseUrls = [];
 
                     console.log('Starting to read response stream for batch');
                     
@@ -726,7 +734,7 @@
                                         totalUrls = data.total_count;
                                         nextIndex = data.next_index;
                                         hasMore = data.has_more;
-                                        urls = data.urls;
+                                        responseUrls = data.urls;
                                         
                                         // If this is the final batch, accumulate the CSV
                                         if (data.type === 'complete') {
@@ -782,15 +790,16 @@
                         hasMore, 
                         nextIndex, 
                         totalUrls,
-                        urls
+                        responseUrls
                     };
                 }
                 
-                // Start processing the URLs in batches
+                // Process all URL batches
                 let startIndex = 0;
                 let hasMore = true;
                 let isInitial = true;
                 let totalUrls = 0;
+                let allUrlsData = urls;
                 
                 while (hasMore) {
                     if (totalUrls > 0) {
@@ -801,23 +810,35 @@
                         progressText.textContent = `Starting initial batch...`;
                     }
                     
-                    const { batchResults, hasMore: moreResults, nextIndex, totalUrls: total, urls: responseUrls } = 
-                        await processUrlsBatch(isManualUrls ? urls : formData, startIndex, isInitial);
-                    
-                    // Update state for next batch
-                    allResults = [...allResults, ...batchResults];
-                    hasMore = moreResults;
-                    startIndex = nextIndex;
-                    totalUrls = total;
-                    urls = responseUrls; // Use the URLs from the response for the next batch
-                    isInitial = false;
-                    
-                    console.log(`Completed batch. Total results so far: ${allResults.length}/${totalUrls}, next index: ${startIndex}, has more: ${hasMore}`);
-                    
-                    // Update progress
-                    const percentComplete = Math.min(100, Math.round((startIndex / totalUrls) * 100));
-                    progressBar.style.width = `${percentComplete}%`;
-                    progressText.textContent = `Processed ${allResults.length}/${totalUrls} URLs (${percentComplete}%)`;
+                    try {
+                        const batchResult = await processSingleBatch(
+                            isInitial ? (isManualUrls ? urls : formData) : allUrlsData,
+                            startIndex,
+                            isInitial
+                        );
+                        
+                        const { batchResults, hasMore: moreResults, nextIndex, totalUrls: total, responseUrls } = batchResult;
+                        
+                        // Update state for next batch
+                        allResults = [...allResults, ...batchResults];
+                        hasMore = moreResults;
+                        startIndex = nextIndex;
+                        totalUrls = total;
+                        allUrlsData = responseUrls || []; // Use the URLs from the response for the next batch
+                        isInitial = false;
+                        
+                        console.log(`Completed batch. Total results so far: ${allResults.length}/${totalUrls}, next index: ${startIndex}, has more: ${hasMore}`);
+                        
+                        // Update progress
+                        const percentComplete = Math.min(100, Math.round((startIndex / totalUrls) * 100));
+                        progressBar.style.width = `${percentComplete}%`;
+                        progressText.textContent = `Processed ${allResults.length}/${totalUrls} URLs (${percentComplete}%)`;
+                    } catch (error) {
+                        console.error('Batch processing error:', error);
+                        progressText.textContent = `Error processing batch: ${error.message}`;
+                        showAlert(`Error processing batch: ${error.message}. The process has been stopped.`, 'danger');
+                        hasMore = false; // Stop processing on error
+                    }
                 }
                 
                 // All batches completed - display results
