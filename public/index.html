@@ -441,12 +441,12 @@
         const progressSection = document.getElementById('progressSection');
         const progressBar = document.getElementById('progressBar');
         const resultsSection = document.getElementById('resultsSection');
-        const processedUrls = document.getElementById('processedUrls');
-        const totalUrls = document.getElementById('totalUrls');
         const downloadButton = document.getElementById('downloadButton');
         const alertContainer = document.getElementById('alertContainer');
         const urlCount = document.getElementById('urlCount');
         const resultsTable = document.getElementById('resultsTable');
+        const progressText = document.getElementById('progressText');
+        const progressPercent = document.getElementById('progressPercent');
 
         function showAlert(message, type) {
             if (!alertContainer) {
@@ -471,21 +471,21 @@
             }, 5000);
         }
 
-        function updateElement(id, value) {
-            const element = document.getElementById(id);
-            if (element) {
-                element.textContent = value;
+        function updateProgressMessage(message) {
+            if (progressText) {
+                progressText.textContent = message;
             } else {
-                console.warn(`Element with ID '${id}' not found when trying to set value: ${value}`);
+                console.warn(`Progress text element not found when trying to set message: ${message}`);
             }
         }
 
         function updateProgressBar(percent) {
-            const progressBar = document.getElementById('progressBar');
             if (progressBar) {
                 progressBar.style.width = `${percent}%`;
             }
-            updateElement('progressPercent', `${percent}%`);
+            if (progressPercent) {
+                progressPercent.textContent = `${percent}%`;
+            }
         }
 
         function displayResults(results) {
@@ -542,8 +542,10 @@
             });
             
             console.log('Results rendering complete, setting display to block');
-            resultsSection.style.display = 'block';
-            console.log('ResultsSection display value after change:', resultsSection.style.display);
+            if (resultsSection) {
+                resultsSection.style.display = 'block';
+                console.log('ResultsSection display value after change:', resultsSection.style.display);
+            }
         }
 
         function countUrls(text) {
@@ -561,7 +563,6 @@
         }
 
         function enableDownload(csvContent) {
-            const downloadButton = document.getElementById('downloadButton');
             if (!downloadButton) return;
             
             const blob = new Blob([csvContent], { type: 'text/csv' });
@@ -612,27 +613,23 @@
             
             // Log element references to verify they exist
             console.log('DOM Elements check:',
-                'progressBar:', !!document.getElementById('progressBar'),
-                'progressText:', !!document.getElementById('progressText'),
-                'resultsSection:', !!document.getElementById('resultsSection'),
-                'submitBtn:', !!document.getElementById('submitBtn'),
-                'progressSection:', !!document.getElementById('progressSection')
+                'progressBar:', !!progressBar,
+                'progressText:', !!progressText,
+                'resultsSection:', !!resultsSection,
+                'submitBtn:', !!submitBtn,
+                'progressSection:', !!progressSection,
+                'progressPercent:', !!progressPercent
             );
             
-            const progressBar = document.getElementById('progressBar');
-            const progressText = document.getElementById('progressText');
-            const resultsSection = document.getElementById('resultsSection');
-            const submitBtn = document.getElementById('submitBtn');
-            const progressSection = document.getElementById('progressSection');
-            
-            progressBar.style.width = '0%';
-            progressText.textContent = 'Starting...';
-            resultsSection.style.display = 'none';
-            submitBtn.disabled = true;
-            progressSection.style.display = 'block';
+            if (progressBar) progressBar.style.width = '0%';
+            updateProgressMessage('Processing...');
+            if (resultsSection) resultsSection.style.display = 'none';
+            if (submitBtn) submitBtn.disabled = true;
+            if (progressSection) progressSection.style.display = 'block';
             
             // Store all accumulated results
             let allResults = [];
+            let totalUrlCount = 0;
             
             try {
                 // Prepare initial request data
@@ -643,7 +640,7 @@
                 let initialRequest = true;
                 let isManualUrls = false;
                 
-                if (fileInput.files.length > 0) {
+                if (fileInput && fileInput.files.length > 0) {
                     console.log('Using CSV file upload');
                     const csvFile = fileInput.files[0];
                     // Directly append the file to formData
@@ -657,7 +654,7 @@
 
                     // For multipart form data, don't set custom Content-Type header
                     // The browser will set the correct boundary
-                } else if (urlsTextarea.value) {
+                } else if (urlsTextarea && urlsTextarea.value) {
                     console.log('Using manually entered URLs');
                     urls = urlsTextarea.value
                         .split('\n')
@@ -837,17 +834,15 @@
                                 
                                 switch (data.type) {
                                     case 'batch_start':
-                                        updateElement('progressText', `Processing URLs ${data.start_index}/${data.total_urls}...`);
                                         totalUrls = data.total_urls;
-                                        updateElement('totalUrls', data.total_urls);
+                                        totalUrlCount = data.total_urls; // Store globally
+                                        updateProgressMessage(`Processing ${data.start_index}/${data.total_urls} URLs...`);
                                         break;
                                     
                                     case 'progress':
                                         const percent = data.percent;
                                         updateProgressBar(percent);
-                                        updateElement('progressText', `Processing ${data.processed}/${data.total} URLs...`);
-                                        updateElement('processedUrls', data.processed);
-                                        updateElement('totalUrls', data.total);
+                                        updateProgressMessage(`Processing ${data.processed}/${data.total} URLs...`);
                                         break;
                                     
                                     case 'error':
@@ -855,7 +850,7 @@
                                 }
                             } catch (error) {
                                 console.error('Error parsing response:', error, 'Line:', line);
-                                updateElement('progressText', `Error: ${error.message}`);
+                                updateProgressMessage(`Error: ${error.message}`);
                                 showAlert(error.message, 'danger');
                             }
                         }
@@ -878,7 +873,7 @@
                 let allUrlsData = urls;
                 
                 // Check if the CSV file is valid
-                if (!isManualUrls && fileInput.files.length > 0) {
+                if (!isManualUrls && fileInput && fileInput.files.length > 0) {
                     const csvFile = fileInput.files[0];
                     // Check file type
                     if (!csvFile.name.toLowerCase().endsWith('.csv') && 
@@ -898,12 +893,10 @@
                 while (hasMore) {
                     if (totalUrls > 0) {
                         console.log(`Starting batch from index ${startIndex}/${totalUrls}`);
-                        updateElement('progressText', `Starting batch processing`);
-                        updateElement('processedUrls', startIndex);
-                        updateElement('totalUrls', totalUrls);
+                        updateProgressMessage(`Processing ${startIndex}/${totalUrls} URLs...`);
                     } else {
                         console.log(`Starting batch from index ${startIndex}`);
-                        updateElement('progressText', `Processing`);
+                        updateProgressMessage(`Processing...`);
                     }
                     
                     try {
@@ -938,10 +931,10 @@
                         // Update progress
                         const percentComplete = Math.min(100, Math.round((startIndex / totalUrls) * 100));
                         updateProgressBar(percentComplete);
-                        updateElement('progressText', `Processed ${allResults.length}/${totalUrls} URLs (${percentComplete}%)`);
+                        updateProgressMessage(`Processed ${allResults.length}/${totalUrls} URLs (${percentComplete}%)`);
                     } catch (error) {
                         console.error('Batch processing error:', error);
-                        updateElement('progressText', `Error processing batch: ${error.message}`);
+                        updateProgressMessage(`Error processing batch: ${error.message}`);
                         showAlert(`Error processing batch: ${error.message}. The process has been stopped.`, 'danger');
                         hasMore = false; // Stop processing on error
                     }
@@ -950,11 +943,11 @@
                 // All batches completed - display results
                 console.log(`All batches complete. Total results: ${allResults.length}/${totalUrls}`);
                 updateProgressBar(100);
-                updateElement('progressText', `Processing complete! Processed ${allResults.length}/${totalUrls} URLs`);
+                updateProgressMessage(`Processing complete! Processed ${allResults.length}/${totalUrls} URLs`);
                 
                 // Display results
                 displayResults(allResults);
-                resultsSection.style.display = 'block';
+                if (resultsSection) resultsSection.style.display = 'block';
                 
                 // Generate and enable CSV download if we have results
                 if (allResults.length > 0) {
@@ -965,11 +958,11 @@
                 
             } catch (error) {
                 console.error('Error:', error);
-                updateElement('progressText', `Error: ${error.message}`);
+                updateProgressMessage(`Error: ${error.message}`);
                 updateProgressBar(0);
                 showAlert(error.message, 'danger');
             } finally {
-                submitBtn.disabled = false;
+                if (submitBtn) submitBtn.disabled = false;
             }
         }
 
