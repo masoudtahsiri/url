@@ -31,7 +31,7 @@ const BATCH_SIZE = 10; // Process 10 URLs at a time
 const URL_TIMEOUT = 8000; // 8 seconds per URL
 const MAX_REDIRECTS = 10;
 const MAX_CONCURRENT_BATCHES = 3; // Maximum number of concurrent batches
-const URLS_PER_INVOCATION = 110; // Number of URLs to process per invocation
+const URLS_PER_REQUEST = 100; // Number of URLs to process per serverless function invocation
 
 // Shared counter for progress tracking
 let globalProcessedCount = 0;
@@ -165,6 +165,7 @@ async function checkUrl(url, retryCount = 0) {
 
 // Process URLs in smaller batches with controlled concurrency
 async function processBatch(urls, startIndex, res, totalUrls, processedSoFar = 0) {
+    console.log(`Processing batch starting at index ${startIndex} (${urls.length} URLs)`);
     const batch = urls.slice(startIndex, startIndex + BATCH_SIZE);
     const results = [];
     let localProcessed = 0;
@@ -207,41 +208,62 @@ async function processBatch(urls, startIndex, res, totalUrls, processedSoFar = 0
     return results;
 }
 
-// Process all URLs in a single function invocation
-async function processAllUrls(urls, res) {
+// Process URLs for the current request (paginated)
+async function processUrlsPaginated(urls, startIndex, res) {
+    console.log(`Processing paginated request. Start index: ${startIndex}, Total URLs: ${urls.length}`);
     const totalUrls = urls.length;
-    let processedSoFar = 0;
+    let processedSoFar = startIndex;
     let allResults = [];
     
-    // Send initial response
+    // Calculate end index (limit per request)
+    const endIndex = Math.min(startIndex + URLS_PER_REQUEST, totalUrls);
+    const currentBatchUrls = urls.slice(startIndex, endIndex);
+    
+    console.log(`Processing URLs ${startIndex} to ${endIndex - 1} out of ${totalUrls}`);
+    
+    // Send initial response for this batch
     res.write(JSON.stringify({
-        type: 'start',
+        type: 'batch_start',
+        start_index: startIndex,
+        end_index: endIndex,
         total_urls: totalUrls
     }) + '\n');
     
-    // Process URLs in batches
-    for (let i = 0; i < totalUrls; i += BATCH_SIZE * MAX_CONCURRENT_BATCHES) {
-        const batchPromises = [];
-        const currentBatchSize = Math.min(BATCH_SIZE * MAX_CONCURRENT_BATCHES, totalUrls - i);
+    // Process current batch of URLs
+    for (let i = 0; i < currentBatchUrls.length; i += BATCH_SIZE * MAX_CONCURRENT_BATCHES) {
+        const batchSize = Math.min(BATCH_SIZE * MAX_CONCURRENT_BATCHES, currentBatchUrls.length - i);
+        const localBatch = currentBatchUrls.slice(i, i + batchSize);
+        console.log(`Processing sub-batch of ${localBatch.length} URLs`);
         
-        for (let j = 0; j < currentBatchSize; j += BATCH_SIZE) {
-            const batchStartIndex = i + j;
-            batchPromises.push(processBatch(urls, batchStartIndex, res, totalUrls, processedSoFar));
+        const batchPromises = [];
+        
+        for (let j = 0; j < localBatch.length; j += BATCH_SIZE) {
+            const localStartIndex = j;
+            batchPromises.push(processBatch(localBatch, localStartIndex, res, totalUrls, processedSoFar + i + j));
         }
         
         const batchResults = await Promise.all(batchPromises);
         const flatResults = batchResults.flat();
         allResults = allResults.concat(flatResults);
+        processedSoFar += batchSize;
         
-        processedSoFar += currentBatchSize;
+        console.log(`Processed ${batchSize} URLs in this sub-batch, total processed: ${processedSoFar} of ${totalUrls}`);
     }
     
-    return allResults;
+    console.log(`Finished processing batch. Processed ${allResults.length} URLs in this request.`);
+    return {
+        results: allResults,
+        hasMore: endIndex < totalUrls,
+        nextIndex: endIndex,
+        totalUrls: totalUrls
+    };
 }
 
 app.post('/api/check-urls', async (req, res) => {
     try {
+        console.log('Received URL check request');
         let urls = [];
+        let startIndex = 0;
 
         // Set headers for streaming response
         res.setHeader('Content-Type', 'text/plain; charset=utf-8');
@@ -249,85 +271,115 @@ app.post('/api/check-urls', async (req, res) => {
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('Connection', 'keep-alive');
 
-        // Parse input URLs
-        if (req.headers['content-type']?.includes('multipart/form-data')) {
-            const busboy = Busboy({ headers: req.headers });
-            const filePromise = new Promise((resolve, reject) => {
-                busboy.on('file', (name, file, info) => {
-                    if (name === 'urls') {
-                        let buffer = '';
-                        let urlsToProcess = [];
-                        
-                        const processBuffer = () => {
-                            try {
-                                const results = Papa.parse(buffer, {
-                                    header: true,
-                                    skipEmptyLines: true,
-                                    delimiter: ','
-                                });
-                                
-                                const newUrls = results.data
-                                    .map(row => Object.values(row)[0]?.trim())
-                                    .filter(Boolean);
-                                
-                                if (newUrls.length > 0) {
-                                    urlsToProcess.push(...newUrls);
+        // Check if this is a continuation request
+        if (req.body.continuation) {
+            console.log('Continuation request received');
+            if (Array.isArray(req.body.urls)) {
+                urls = req.body.urls;
+            } else {
+                return res.status(400).json({ error: 'Invalid URLs array in continuation request' });
+            }
+            
+            startIndex = req.body.startIndex || 0;
+            console.log(`Continuation from index ${startIndex} of ${urls.length} URLs`);
+        } else {
+            // Parse input URLs
+            console.log('Initial request received');
+            if (req.headers['content-type']?.includes('multipart/form-data')) {
+                console.log('Processing multipart form data (CSV file)');
+                const busboy = Busboy({ headers: req.headers });
+                const filePromise = new Promise((resolve, reject) => {
+                    busboy.on('file', (name, file, info) => {
+                        if (name === 'urls') {
+                            let buffer = '';
+                            let urlsToProcess = [];
+                            
+                            const processBuffer = () => {
+                                try {
+                                    const results = Papa.parse(buffer, {
+                                        header: true,
+                                        skipEmptyLines: true,
+                                        delimiter: ','
+                                    });
+                                    
+                                    const newUrls = results.data
+                                        .map(row => Object.values(row)[0]?.trim())
+                                        .filter(Boolean);
+                                    
+                                    if (newUrls.length > 0) {
+                                        urlsToProcess.push(...newUrls);
+                                    }
+                                    buffer = '';
+                                } catch (error) {
+                                    console.error('Error parsing CSV:', error);
                                 }
-                                buffer = '';
-                            } catch (error) {
-                                console.error('Error parsing CSV:', error);
-                            }
-                        };
+                            };
 
-                        file.on('data', chunk => {
-                            buffer += chunk.toString('utf8');
-                            if (buffer.length > 1024 * 10) {
-                                processBuffer();
-                            }
-                        });
+                            file.on('data', chunk => {
+                                buffer += chunk.toString('utf8');
+                                if (buffer.length > 1024 * 10) {
+                                    processBuffer();
+                                }
+                            });
 
-                        file.on('end', () => {
-                            if (buffer.length > 0) {
-                                processBuffer();
-                            }
-                            if (urlsToProcess.length === 0) {
-                                reject(new Error('No valid URLs found in CSV file'));
-                                return;
-                            }
-                            resolve(urlsToProcess);
-                        });
-                        file.on('error', reject);
-                    } else {
-                        file.resume();
-                    }
+                            file.on('end', () => {
+                                if (buffer.length > 0) {
+                                    processBuffer();
+                                }
+                                if (urlsToProcess.length === 0) {
+                                    reject(new Error('No valid URLs found in CSV file'));
+                                    return;
+                                }
+                                console.log(`Extracted ${urlsToProcess.length} URLs from CSV file`);
+                                resolve(urlsToProcess);
+                            });
+                            file.on('error', reject);
+                        } else {
+                            file.resume();
+                        }
+                    });
+                    busboy.on('error', reject);
+                    req.pipe(busboy);
                 });
-                busboy.on('error', reject);
-                req.pipe(busboy);
-            });
 
-            urls = await filePromise;
-        } else if (req.body.urls) {
-            urls = Array.isArray(req.body.urls) ? req.body.urls : [req.body.urls];
-            urls = urls.filter(url => url && url.trim());
+                urls = await filePromise;
+            } else if (req.body.urls) {
+                console.log('Processing JSON URLs from request body');
+                urls = Array.isArray(req.body.urls) ? req.body.urls : [req.body.urls];
+                urls = urls.filter(url => url && url.trim());
+                console.log(`Received ${urls.length} URLs from request body`);
+            }
         }
 
         if (urls.length === 0) {
+            console.log('No valid URLs provided');
             return res.status(400).json({ error: 'No valid URLs provided' });
         }
 
-        // Process all URLs in a single invocation
-        const results = await processAllUrls(urls, res);
+        // Process the current batch of URLs
+        const { results, hasMore, nextIndex, totalUrls } = await processUrlsPaginated(urls, startIndex, res);
         
-        // Generate CSV and send complete response
-        const csvContent = generateCsvContent(results);
-        res.write(JSON.stringify({
-            type: 'complete',
+        // Generate CSV for current batch
+        let csvContent = '';
+        if (results.length > 0) {
+            csvContent = generateCsvContent(results);
+        }
+        
+        // Send response
+        const responseData = {
+            type: hasMore ? 'batch_complete' : 'complete',
             success: true,
             results: results,
             csv: csvContent,
-            total_processed: results.length,
-            total_urls: urls.length
-        }));
+            processed_count: results.length,
+            total_count: totalUrls,
+            has_more: hasMore,
+            next_index: nextIndex,
+            urls: urls // Send all URLs back for the next request
+        };
+        
+        console.log(`Sending response: ${hasMore ? 'batch_complete' : 'complete'}, processed: ${results.length}, has_more: ${hasMore}, next_index: ${nextIndex}`);
+        res.write(JSON.stringify(responseData));
         res.end();
 
     } catch (error) {

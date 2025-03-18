@@ -582,15 +582,22 @@
             submitBtn.disabled = true;
             progressSection.style.display = 'block';
             
+            // Store all accumulated results
+            let allResults = [];
+            let csvContent = '';
+            
             try {
+                // Prepare initial request data
                 const formData = new FormData();
                 const fileInput = document.getElementById('csvFile');
                 const urlsTextarea = document.getElementById('urls');
+                let urls = [];
+                let initialRequest = true;
                 
                 if (fileInput.files.length > 0) {
                     formData.append('urls', fileInput.files[0]);
                 } else if (urlsTextarea.value) {
-                    const urls = urlsTextarea.value
+                    urls = urlsTextarea.value
                         .split('\n')
                         .map(url => url.trim())
                         .filter(url => url);
@@ -598,93 +605,162 @@
                 } else {
                     throw new Error('Please provide URLs or upload a CSV file');
                 }
-
-                // Single function to process URLs
-                const response = await fetch('/api/check-urls', {
-                    method: 'POST',
-                    body: formData
-                });
-
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-
-                const reader = response.body.getReader();
-                const decoder = new TextDecoder();
-                let buffer = '';
-                let allResults = [];
-
-                console.log('Starting to read response stream');
                 
-                while (true) {
-                    const { done, value } = await reader.read();
+                // Process URLs in batches
+                async function processUrlsBatch(requestData, startIndex = 0, isInitial = true) {
+                    console.log(`Processing batch starting at index ${startIndex} (initial: ${isInitial})`);
                     
-                    if (done) {
-                        console.log('Stream reading complete');
-                        console.log('Final buffer content:', buffer);
+                    const response = await fetch('/api/check-urls', {
+                        method: 'POST',
+                        body: isInitial ? formData : JSON.stringify({
+                            continuation: true,
+                            urls: requestData,
+                            startIndex: startIndex
+                        }),
+                        headers: isInitial ? {} : {
+                            'Content-Type': 'application/json'
+                        }
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+
+                    const reader = response.body.getReader();
+                    const decoder = new TextDecoder();
+                    let buffer = '';
+                    let batchResults = [];
+                    let batchComplete = false;
+                    let totalUrls = 0;
+                    let nextIndex = 0;
+                    let hasMore = false;
+                    let urls = [];
+
+                    console.log('Starting to read response stream for batch');
+                    
+                    while (true) {
+                        const { done, value } = await reader.read();
                         
-                        // Process any remaining data in the buffer
-                        if (buffer.trim()) {
-                            try {
-                                const data = JSON.parse(buffer.trim());
-                                console.log('Final message type:', data.type);
-                                
-                                // Handle the final complete message if it exists
-                                if (data.type === 'complete') {
-                                    progressBar.style.width = '100%';
-                                    progressText.textContent = 'Processing complete!';
-                                    console.log(`Complete - received ${data.results?.length || 0} results`);
+                        if (done) {
+                            console.log('Stream reading complete for this batch');
+                            console.log('Final buffer content:', buffer);
+                            
+                            // Process any remaining data in the buffer
+                            if (buffer.trim()) {
+                                try {
+                                    const data = JSON.parse(buffer.trim());
+                                    console.log('Final message type:', data.type);
                                     
-                                    // Display results - use the results from this final message
-                                    displayResults(data.results);
-                                    resultsSection.style.display = 'block';
-                                    console.log('ResultsSection display after complete:', resultsSection.style.display);
-                                    
-                                    // Enable CSV download
-                                    if (data.csv) {
-                                        console.log('CSV data received, enabling download');
-                                        enableDownload(data.csv);
+                                    // Handle the final batch response
+                                    if (data.type === 'batch_complete' || data.type === 'complete') {
+                                        batchComplete = true;
+                                        batchResults = [...batchResults, ...data.results];
+                                        totalUrls = data.total_count;
+                                        nextIndex = data.next_index;
+                                        hasMore = data.has_more;
+                                        urls = data.urls;
+                                        
+                                        // If this is the final batch, accumulate the CSV
+                                        if (data.type === 'complete') {
+                                            csvContent = data.csv;
+                                        }
+                                        
+                                        console.log(`Batch ${data.type} - received ${data.results?.length || 0} results, next index: ${nextIndex}, has more: ${hasMore}`);
                                     }
+                                } catch (error) {
+                                    console.error('Error parsing final buffer:', error, 'Buffer:', buffer);
+                                }
+                            }
+                            break;
+                        }
+                        
+                        buffer += decoder.decode(value, { stream: true });
+                        
+                        const lines = buffer.split('\n');
+                        buffer = lines.pop() || '';
+                        
+                        console.log(`Processing ${lines.length} lines from stream`);
+                        
+                        for (const line of lines) {
+                            try {
+                                const data = JSON.parse(line);
+                                console.log('Message type:', data.type);
+                                
+                                switch (data.type) {
+                                    case 'batch_start':
+                                        progressText.textContent = `Processing URLs ${data.start_index} to ${data.end_index} of ${data.total_urls}...`;
+                                        totalUrls = data.total_urls;
+                                        break;
+                                    
+                                    case 'progress':
+                                        progressBar.style.width = `${data.percent}%`;
+                                        progressText.textContent = `Processing ${data.processed}/${data.total} URLs...`;
+                                        break;
+                                    
+                                    case 'error':
+                                        throw new Error(data.error);
                                 }
                             } catch (error) {
-                                console.error('Error parsing final buffer:', error, 'Buffer:', buffer);
+                                console.error('Error parsing response:', error, 'Line:', line);
+                                progressText.textContent = `Error: ${error.message}`;
+                                showAlert(error.message, 'danger');
                             }
                         }
-                        break;
                     }
                     
-                    buffer += decoder.decode(value, { stream: true });
-                    
-                    const lines = buffer.split('\n');
-                    buffer = lines.pop() || '';
-                    
-                    console.log(`Processing ${lines.length} lines from stream`);
-                    
-                    for (const line of lines) {
-                        try {
-                            const data = JSON.parse(line);
-                            console.log('Message type:', data.type);
-                            
-                            switch (data.type) {
-                                case 'start':
-                                    progressText.textContent = `Processing 0/${data.total_urls} URLs...`;
-                                    break;
-                                
-                                case 'progress':
-                                    progressBar.style.width = `${data.percent}%`;
-                                    progressText.textContent = `Processing ${data.processed}/${data.total} URLs...`;
-                                    break;
-                                
-                                case 'error':
-                                    throw new Error(data.error);
-                            }
-                        } catch (error) {
-                            console.error('Error parsing response:', error, 'Line:', line);
-                            progressText.textContent = `Error: ${error.message}`;
-                            showAlert(error.message, 'danger');
-                        }
-                    }
+                    return { 
+                        batchResults, 
+                        hasMore, 
+                        nextIndex, 
+                        totalUrls,
+                        urls
+                    };
                 }
+                
+                // Start processing the URLs in batches
+                let startIndex = 0;
+                let hasMore = true;
+                let isInitial = true;
+                let totalUrls = 0;
+                
+                while (hasMore) {
+                    console.log(`Starting batch from index ${startIndex}`);
+                    progressText.textContent = `Starting batch from index ${startIndex}...`;
+                    
+                    const { batchResults, hasMore: moreResults, nextIndex, totalUrls: total, urls: responseUrls } = 
+                        await processUrlsBatch(urls, startIndex, isInitial);
+                    
+                    // Update state for next batch
+                    allResults = [...allResults, ...batchResults];
+                    hasMore = moreResults;
+                    startIndex = nextIndex;
+                    totalUrls = total;
+                    urls = responseUrls; // Use the URLs from the response for the next batch
+                    isInitial = false;
+                    
+                    console.log(`Completed batch. Total results so far: ${allResults.length}, next index: ${startIndex}, has more: ${hasMore}`);
+                    
+                    // Update progress
+                    const percentComplete = Math.min(100, Math.round((startIndex / totalUrls) * 100));
+                    progressBar.style.width = `${percentComplete}%`;
+                    progressText.textContent = `Processed ${allResults.length} of ${totalUrls} URLs (${percentComplete}%)`;
+                }
+                
+                // All batches completed - display results
+                console.log(`All batches complete. Total results: ${allResults.length}`);
+                progressBar.style.width = '100%';
+                progressText.textContent = `Processing complete! Processed ${allResults.length} URLs`;
+                
+                // Display results
+                displayResults(allResults);
+                resultsSection.style.display = 'block';
+                
+                // Enable CSV download if we have results
+                if (allResults.length > 0) {
+                    console.log('Enabling CSV download');
+                    enableDownload(csvContent);
+                }
+                
             } catch (error) {
                 console.error('Error:', error);
                 progressText.textContent = `Error: ${error.message}`;
