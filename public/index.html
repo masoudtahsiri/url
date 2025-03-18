@@ -622,6 +622,44 @@
                         
                         if (done) {
                             console.log('Stream reading complete');
+                            console.log('Final buffer content:', buffer);
+                            
+                            // Process any remaining data in the buffer
+                            if (buffer.trim()) {
+                                try {
+                                    const data = JSON.parse(buffer.trim());
+                                    console.log('Final message type:', data.type);
+                                    
+                                    // Handle the final complete message if it exists
+                                    if (data.type === 'complete') {
+                                        progressBar.style.width = '100%';
+                                        progressText.textContent = 'Processing complete!';
+                                        console.log(`Complete - received ${data.results?.length || 0} results`);
+                                        allResults = allResults.concat(data.results || []);
+                                        console.log(`Final results count: ${allResults.length}`);
+                                        
+                                        // Display results
+                                        displayResults(allResults);
+                                        resultsSection.style.display = 'block';
+                                        console.log('ResultsSection display after complete:', resultsSection.style.display);
+                                        
+                                        // Enable CSV download
+                                        if (data.csv) {
+                                            console.log('CSV data received, enabling download');
+                                            enableDownload(data.csv);
+                                        }
+                                    } else if (data.type === 'batch_complete' && data.continuation) {
+                                        progressText.textContent = `Processed ${data.processed}/${data.total} URLs. Starting next batch...`;
+                                        console.log(`Batch complete - received ${data.results?.length || 0} results`);
+                                        allResults = allResults.concat(data.results || []);
+                                        console.log(`All results now contains ${allResults.length} items`);
+                                        // Process next batch
+                                        await processUrls(data.continuation, true);
+                                    }
+                                } catch (error) {
+                                    console.error('Error parsing final buffer:', error, 'Buffer:', buffer);
+                                }
+                            }
                             break;
                         }
                         
