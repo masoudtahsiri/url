@@ -724,7 +724,7 @@
                                 
                                 switch (data.type) {
                                     case 'batch_start':
-                                        progressText.textContent = `Processing URLs ${data.start_index} to ${data.end_index} of ${data.total_urls}...`;
+                                        progressText.textContent = `Processing URLs ${data.start_index}/${data.total_urls}...`;
                                         totalUrls = data.total_urls;
                                         break;
                                     
@@ -760,8 +760,13 @@
                 let totalUrls = 0;
                 
                 while (hasMore) {
-                    console.log(`Starting batch from index ${startIndex}`);
-                    progressText.textContent = `Starting batch from index ${startIndex}...`;
+                    if (totalUrls > 0) {
+                        console.log(`Starting batch from index ${startIndex}/${totalUrls}`);
+                        progressText.textContent = `Starting batch ${startIndex}/${totalUrls}...`;
+                    } else {
+                        console.log(`Starting batch from index ${startIndex}`);
+                        progressText.textContent = `Starting initial batch...`;
+                    }
                     
                     const { batchResults, hasMore: moreResults, nextIndex, totalUrls: total, urls: responseUrls } = 
                         await processUrlsBatch(urls, startIndex, isInitial);
@@ -774,18 +779,18 @@
                     urls = responseUrls; // Use the URLs from the response for the next batch
                     isInitial = false;
                     
-                    console.log(`Completed batch. Total results so far: ${allResults.length}, next index: ${startIndex}, has more: ${hasMore}`);
+                    console.log(`Completed batch. Total results so far: ${allResults.length}/${totalUrls}, next index: ${startIndex}, has more: ${hasMore}`);
                     
                     // Update progress
                     const percentComplete = Math.min(100, Math.round((startIndex / totalUrls) * 100));
                     progressBar.style.width = `${percentComplete}%`;
-                    progressText.textContent = `Processed ${allResults.length} of ${totalUrls} URLs (${percentComplete}%)`;
+                    progressText.textContent = `Processed ${allResults.length}/${totalUrls} URLs (${percentComplete}%)`;
                 }
                 
                 // All batches completed - display results
-                console.log(`All batches complete. Total results: ${allResults.length}`);
+                console.log(`All batches complete. Total results: ${allResults.length}/${totalUrls}`);
                 progressBar.style.width = '100%';
-                progressText.textContent = `Processing complete! Processed ${allResults.length} URLs`;
+                progressText.textContent = `Processing complete! Processed ${allResults.length}/${totalUrls} URLs`;
                 
                 // Display results
                 displayResults(allResults);
