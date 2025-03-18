@@ -394,8 +394,11 @@
                     </form>
 
                     <div id="progressSection" style="display: none;">
-                        <div class="progress">
+                        <div class="progress position-relative">
                             <div class="progress-bar" id="progressBar" role="progressbar" style="width: 0%"></div>
+                            <div class="position-absolute w-100 text-center" style="top: 0; line-height: 0.75rem; font-size: 0.75rem; color: #000; padding: 2px;">
+                                <span id="progressPercent">0%</span>
+                            </div>
                         </div>
                         <p class="text-center text-muted" id="progressText">
                             Processing: <span id="processedUrls">0</span> / <span id="totalUrls">0</span>
@@ -830,11 +833,16 @@
                                     case 'batch_start':
                                         progressText.textContent = `Processing URLs ${data.start_index}/${data.total_urls}...`;
                                         totalUrls = data.total_urls;
+                                        document.getElementById('totalUrls').textContent = data.total_urls;
                                         break;
                                     
                                     case 'progress':
-                                        progressBar.style.width = `${data.percent}%`;
+                                        const percent = data.percent;
+                                        progressBar.style.width = `${percent}%`;
+                                        document.getElementById('progressPercent').textContent = `${percent}%`;
                                         progressText.textContent = `Processing ${data.processed}/${data.total} URLs...`;
+                                        document.getElementById('processedUrls').textContent = data.processed;
+                                        document.getElementById('totalUrls').textContent = data.total;
                                         break;
                                     
                                     case 'error':
@@ -885,10 +893,12 @@
                 while (hasMore) {
                     if (totalUrls > 0) {
                         console.log(`Starting batch from index ${startIndex}/${totalUrls}`);
-                        progressText.textContent = `Starting batch ${startIndex}/${totalUrls}...`;
+                        progressText.textContent = `Starting batch processing`;
+                        document.getElementById('processedUrls').textContent = startIndex;
+                        document.getElementById('totalUrls').textContent = totalUrls;
                     } else {
                         console.log(`Starting batch from index ${startIndex}`);
-                        progressText.textContent = `Starting initial batch...`;
+                        progressText.textContent = `Processing`;
                     }
                     
                     try {
@@ -923,6 +933,7 @@
                         // Update progress
                         const percentComplete = Math.min(100, Math.round((startIndex / totalUrls) * 100));
                         progressBar.style.width = `${percentComplete}%`;
+                        document.getElementById('progressPercent').textContent = `${percentComplete}%`;
                         progressText.textContent = `Processed ${allResults.length}/${totalUrls} URLs (${percentComplete}%)`;
                     } catch (error) {
                         console.error('Batch processing error:', error);
@@ -935,6 +946,7 @@
                 // All batches completed - display results
                 console.log(`All batches complete. Total results: ${allResults.length}/${totalUrls}`);
                 progressBar.style.width = '100%';
+                document.getElementById('progressPercent').textContent = '100%';
                 progressText.textContent = `Processing complete! Processed ${allResults.length}/${totalUrls} URLs`;
                 
                 // Display results
