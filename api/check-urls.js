@@ -177,13 +177,17 @@ async function processBatch(urls, startIndex, res, totalUrls, processedSoFar = 0
             
             // Update progress after each URL
             localProcessed++;
-            const progress = {
-                type: 'progress',
-                processed: processedSoFar + localProcessed,
-                total: totalUrls,
-                percent: Math.round(((processedSoFar + localProcessed) / totalUrls) * 100)
-            };
-            res.write(JSON.stringify(progress) + '\n');
+            
+            // Only send progress every 5 URLs to reduce overhead
+            if (localProcessed % 5 === 0 || localProcessed === batch.length) {
+                const progress = {
+                    type: 'progress',
+                    processed: processedSoFar + localProcessed,
+                    total: totalUrls,
+                    percent: Math.round(((processedSoFar + localProcessed) / totalUrls) * 100)
+                };
+                res.write(JSON.stringify(progress) + '\n');
+            }
             
             // Add a small delay between requests (100ms)
             await new Promise(resolve => setTimeout(resolve, 100));
@@ -203,49 +207,41 @@ async function processBatch(urls, startIndex, res, totalUrls, processedSoFar = 0
     return results;
 }
 
-// Process URLs in chunks to avoid timeouts
-async function processUrlsInChunks(urls, res, startIndex = 0) {
-    const results = [];
+// Process all URLs in a single function invocation
+async function processAllUrls(urls, res) {
     const totalUrls = urls.length;
-    const endIndex = Math.min(startIndex + URLS_PER_INVOCATION, totalUrls);
-    const currentBatch = urls.slice(startIndex, endIndex);
+    let processedSoFar = 0;
+    let allResults = [];
     
-    // Process current batch of URLs
-    for (let i = 0; i < currentBatch.length; i += BATCH_SIZE * MAX_CONCURRENT_BATCHES) {
-        const chunk = currentBatch.slice(i, Math.min(i + BATCH_SIZE * MAX_CONCURRENT_BATCHES, currentBatch.length));
-        const chunkPromises = [];
+    // Send initial response
+    res.write(JSON.stringify({
+        type: 'start',
+        total_urls: totalUrls
+    }) + '\n');
+    
+    // Process URLs in batches
+    for (let i = 0; i < totalUrls; i += BATCH_SIZE * MAX_CONCURRENT_BATCHES) {
+        const batchPromises = [];
+        const currentBatchSize = Math.min(BATCH_SIZE * MAX_CONCURRENT_BATCHES, totalUrls - i);
         
-        for (let j = 0; j < chunk.length; j += BATCH_SIZE) {
-            chunkPromises.push(
-                processBatch(chunk, j, res, totalUrls, startIndex + i + j)
-            );
+        for (let j = 0; j < currentBatchSize; j += BATCH_SIZE) {
+            const batchStartIndex = i + j;
+            batchPromises.push(processBatch(urls, batchStartIndex, res, totalUrls, processedSoFar));
         }
         
-        try {
-            const chunkResults = await Promise.all(chunkPromises);
-            results.push(...chunkResults.flat());
-        } catch (error) {
-            console.error('Error processing chunk:', error);
-            continue;
-        }
+        const batchResults = await Promise.all(batchPromises);
+        const flatResults = batchResults.flat();
+        allResults = allResults.concat(flatResults);
+        
+        processedSoFar += currentBatchSize;
     }
-
-    // Return results and continuation info
-    return {
-        results,
-        continuation: endIndex < totalUrls ? {
-            remainingUrls: urls.slice(endIndex),
-            startIndex: endIndex,
-            totalUrls: totalUrls
-        } : null
-    };
+    
+    return allResults;
 }
 
 app.post('/api/check-urls', async (req, res) => {
     try {
         let urls = [];
-        let startIndex = 0;
-        let totalUrls = 0;
 
         // Set headers for streaming response
         res.setHeader('Content-Type', 'text/plain; charset=utf-8');
@@ -253,136 +249,86 @@ app.post('/api/check-urls', async (req, res) => {
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('Connection', 'keep-alive');
 
-        // Check if this is a continuation of previous processing
-        if (req.body.continuation) {
-            urls = req.body.continuation.remainingUrls;
-            startIndex = req.body.continuation.startIndex;
-            totalUrls = req.body.continuation.totalUrls;
-            
-            // Send continuation start message
-            res.write(JSON.stringify({
-                type: 'continuation_start',
-                start_index: startIndex,
-                total_urls: totalUrls
-            }) + '\n');
-        } else {
-            // Handle initial request (file upload or URL input)
-            if (req.headers['content-type']?.includes('multipart/form-data')) {
-                const busboy = Busboy({ headers: req.headers });
-                const filePromise = new Promise((resolve, reject) => {
-                    busboy.on('file', (name, file, info) => {
-                        if (name === 'urls') {
-                            let buffer = '';
-                            let urlsToProcess = [];
-                            
-                            const processBuffer = () => {
-                                try {
-                                    const results = Papa.parse(buffer, {
-                                        header: true,
-                                        skipEmptyLines: true,
-                                        delimiter: ','
-                                    });
-                                    
-                                    const newUrls = results.data
-                                        .map(row => Object.values(row)[0]?.trim())
-                                        .filter(Boolean);
-                                    
-                                    if (newUrls.length > 0) {
-                                        urlsToProcess.push(...newUrls);
-                                    }
-                                    buffer = '';
-                                } catch (error) {
-                                    console.error('Error parsing CSV:', error);
+        // Parse input URLs
+        if (req.headers['content-type']?.includes('multipart/form-data')) {
+            const busboy = Busboy({ headers: req.headers });
+            const filePromise = new Promise((resolve, reject) => {
+                busboy.on('file', (name, file, info) => {
+                    if (name === 'urls') {
+                        let buffer = '';
+                        let urlsToProcess = [];
+                        
+                        const processBuffer = () => {
+                            try {
+                                const results = Papa.parse(buffer, {
+                                    header: true,
+                                    skipEmptyLines: true,
+                                    delimiter: ','
+                                });
+                                
+                                const newUrls = results.data
+                                    .map(row => Object.values(row)[0]?.trim())
+                                    .filter(Boolean);
+                                
+                                if (newUrls.length > 0) {
+                                    urlsToProcess.push(...newUrls);
                                 }
-                            };
+                                buffer = '';
+                            } catch (error) {
+                                console.error('Error parsing CSV:', error);
+                            }
+                        };
 
-                            file.on('data', chunk => {
-                                buffer += chunk.toString('utf8');
-                                if (buffer.length > 1024 * 10) {
-                                    processBuffer();
-                                }
-                            });
+                        file.on('data', chunk => {
+                            buffer += chunk.toString('utf8');
+                            if (buffer.length > 1024 * 10) {
+                                processBuffer();
+                            }
+                        });
 
-                            file.on('end', () => {
-                                if (buffer.length > 0) {
-                                    processBuffer();
-                                }
-                                if (urlsToProcess.length === 0) {
-                                    reject(new Error('No valid URLs found in CSV file'));
-                                    return;
-                                }
-                                resolve(urlsToProcess);
-                            });
-                            file.on('error', reject);
-                        } else {
-                            file.resume();
-                        }
-                    });
-                    busboy.on('error', reject);
-                    req.pipe(busboy);
+                        file.on('end', () => {
+                            if (buffer.length > 0) {
+                                processBuffer();
+                            }
+                            if (urlsToProcess.length === 0) {
+                                reject(new Error('No valid URLs found in CSV file'));
+                                return;
+                            }
+                            resolve(urlsToProcess);
+                        });
+                        file.on('error', reject);
+                    } else {
+                        file.resume();
+                    }
                 });
+                busboy.on('error', reject);
+                req.pipe(busboy);
+            });
 
-                urls = await filePromise;
-            } else if (req.body.urls) {
-                urls = Array.isArray(req.body.urls) ? req.body.urls : [req.body.urls];
-                urls = urls.filter(url => url && url.trim());
-            }
-
-            if (urls.length === 0) {
-                return res.status(400).json({ error: 'No valid URLs provided' });
-            }
-
-            totalUrls = urls.length;
-            
-            // Send initial response with total URLs
-            res.write(JSON.stringify({
-                type: 'start',
-                total_urls: totalUrls,
-                estimated_invocations: Math.ceil(totalUrls / URLS_PER_INVOCATION)
-            }) + '\n');
+            urls = await filePromise;
+        } else if (req.body.urls) {
+            urls = Array.isArray(req.body.urls) ? req.body.urls : [req.body.urls];
+            urls = urls.filter(url => url && url.trim());
         }
 
-        // Process URLs for this invocation
-        const { results, continuation } = await processUrlsInChunks(urls, res, startIndex);
+        if (urls.length === 0) {
+            return res.status(400).json({ error: 'No valid URLs provided' });
+        }
+
+        // Process all URLs in a single invocation
+        const results = await processAllUrls(urls, res);
         
-        // For testing with small URL sets - always consider these complete
-        if (results.length <= 5) {
-            // Just process everything and send the complete response
-            const csvContent = generateCsvContent(results);
-            res.write(JSON.stringify({
-                type: 'complete',
-                success: true,
-                results: results,
-                csv: csvContent,
-                total_processed: results.length,
-                total_urls: totalUrls
-            }));
-            return res.end();
-        }
-
-        // Send response based on whether there's more to process
-        if (continuation) {
-            res.write(JSON.stringify({
-                type: 'batch_complete',
-                success: true,
-                results: results,
-                processed: startIndex + results.length,
-                total: totalUrls,
-                continuation: continuation
-            }));
-            return res.end();
-        } else {
-            const csvContent = generateCsvContent(results);
-            res.write(JSON.stringify({
-                type: 'complete',
-                success: true,
-                results: results,
-                csv: csvContent,
-                total_processed: results.length,
-                total_urls: totalUrls
-            }));
-            return res.end();
-        }
+        // Generate CSV and send complete response
+        const csvContent = generateCsvContent(results);
+        res.write(JSON.stringify({
+            type: 'complete',
+            success: true,
+            results: results,
+            csv: csvContent,
+            total_processed: results.length,
+            total_urls: urls.length
+        }));
+        res.end();
 
     } catch (error) {
         console.error('Error processing URLs:', error);
@@ -396,8 +342,7 @@ app.post('/api/check-urls', async (req, res) => {
                 res.write(JSON.stringify({
                     type: 'error',
                     error: error.message,
-                    recoverable: true,
-                    processed: startIndex
+                    recoverable: true
                 }));
                 res.end();
             }

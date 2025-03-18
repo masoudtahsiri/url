@@ -599,141 +599,92 @@
                     throw new Error('Please provide URLs or upload a CSV file');
                 }
 
-                async function processUrls(data, isContinuation = false) {
-                    console.log('Starting processUrls call:', isContinuation ? 'continuation' : 'initial');
+                // Single function to process URLs
+                const response = await fetch('/api/check-urls', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+                let allResults = [];
+
+                console.log('Starting to read response stream');
+                
+                while (true) {
+                    const { done, value } = await reader.read();
                     
-                    const response = await fetch('/api/check-urls', {
-                        method: 'POST',
-                        body: isContinuation ? JSON.stringify({ continuation: data }) : formData,
-                        headers: isContinuation ? { 'Content-Type': 'application/json' } : {}
-                    });
-
-                    if (!response.ok) {
-                        throw new Error(`HTTP error! status: ${response.status}`);
-                    }
-
-                    const reader = response.body.getReader();
-                    const decoder = new TextDecoder();
-                    let buffer = '';
-                    let allResults = [];
-
-                    console.log('Starting to read response stream');
-                    
-                    while (true) {
-                        const { done, value } = await reader.read();
+                    if (done) {
+                        console.log('Stream reading complete');
+                        console.log('Final buffer content:', buffer);
                         
-                        if (done) {
-                            console.log('Stream reading complete');
-                            console.log('Final buffer content:', buffer);
-                            
-                            // Process any remaining data in the buffer
-                            if (buffer.trim()) {
-                                try {
-                                    const data = JSON.parse(buffer.trim());
-                                    console.log('Final message type:', data.type);
-                                    
-                                    // Handle the final complete message if it exists
-                                    if (data.type === 'complete') {
-                                        progressBar.style.width = '100%';
-                                        progressText.textContent = 'Processing complete!';
-                                        console.log(`Complete - received ${data.results?.length || 0} results`);
-                                        allResults = allResults.concat(data.results || []);
-                                        console.log(`Final results count: ${allResults.length}`);
-                                        
-                                        // Display results
-                                        displayResults(allResults);
-                                        resultsSection.style.display = 'block';
-                                        console.log('ResultsSection display after complete:', resultsSection.style.display);
-                                        
-                                        // Enable CSV download
-                                        if (data.csv) {
-                                            console.log('CSV data received, enabling download');
-                                            enableDownload(data.csv);
-                                        }
-                                    } else if (data.type === 'batch_complete' && data.continuation) {
-                                        progressText.textContent = `Processed ${data.processed}/${data.total} URLs. Starting next batch...`;
-                                        console.log(`Batch complete - received ${data.results?.length || 0} results`);
-                                        allResults = allResults.concat(data.results || []);
-                                        console.log(`All results now contains ${allResults.length} items`);
-                                        // Process next batch
-                                        await processUrls(data.continuation, true);
-                                    }
-                                } catch (error) {
-                                    console.error('Error parsing final buffer:', error, 'Buffer:', buffer);
-                                }
-                            }
-                            break;
-                        }
-                        
-                        buffer += decoder.decode(value, { stream: true });
-                        
-                        const lines = buffer.split('\n');
-                        buffer = lines.pop() || '';
-                        
-                        console.log(`Processing ${lines.length} lines from stream`);
-                        
-                        for (const line of lines) {
+                        // Process any remaining data in the buffer
+                        if (buffer.trim()) {
                             try {
-                                const data = JSON.parse(line);
-                                console.log('Message type:', data.type);
+                                const data = JSON.parse(buffer.trim());
+                                console.log('Final message type:', data.type);
                                 
-                                switch (data.type) {
-                                    case 'start':
-                                        progressText.textContent = `Processing 0/${data.total_urls} URLs...`;
-                                        break;
-                                        
-                                    case 'continuation_start':
-                                        progressText.textContent = `Continuing from ${data.start_index}/${data.total_urls} URLs...`;
-                                        break;
+                                // Handle the final complete message if it exists
+                                if (data.type === 'complete') {
+                                    progressBar.style.width = '100%';
+                                    progressText.textContent = 'Processing complete!';
+                                    console.log(`Complete - received ${data.results?.length || 0} results`);
                                     
-                                    case 'progress':
-                                        progressBar.style.width = `${data.percent}%`;
-                                        progressText.textContent = `Processing ${data.processed}/${data.total} URLs...`;
-                                        break;
+                                    // Display results - use the results from this final message
+                                    displayResults(data.results);
+                                    resultsSection.style.display = 'block';
+                                    console.log('ResultsSection display after complete:', resultsSection.style.display);
                                     
-                                    case 'batch_complete':
-                                        if (data.continuation) {
-                                            progressText.textContent = `Processed ${data.processed}/${data.total} URLs. Starting next batch...`;
-                                            console.log(`Batch complete - received ${data.results?.length || 0} results`);
-                                            allResults = allResults.concat(data.results || []);
-                                            console.log(`All results now contains ${allResults.length} items`);
-                                            // Process next batch
-                                            await processUrls(data.continuation, true);
-                                        }
-                                        break;
-                                    
-                                    case 'complete':
-                                        progressBar.style.width = '100%';
-                                        progressText.textContent = 'Processing complete!';
-                                        console.log(`Complete - received ${data.results?.length || 0} results`);
-                                        allResults = allResults.concat(data.results || []);
-                                        console.log(`Final results count: ${allResults.length}`);
-                                        
-                                        // Display results
-                                        displayResults(allResults);
-                                        resultsSection.style.display = 'block';
-                                        console.log('ResultsSection display after complete:', resultsSection.style.display);
-                                        
-                                        // Enable CSV download
-                                        if (data.csv) {
-                                            console.log('CSV data received, enabling download');
-                                            enableDownload(data.csv);
-                                        }
-                                        break;
-                                    
-                                    case 'error':
-                                        throw new Error(data.error);
+                                    // Enable CSV download
+                                    if (data.csv) {
+                                        console.log('CSV data received, enabling download');
+                                        enableDownload(data.csv);
+                                    }
                                 }
                             } catch (error) {
-                                console.error('Error parsing response:', error, 'Line:', line);
-                                progressText.textContent = `Error: ${error.message}`;
-                                showAlert(error.message, 'danger');
+                                console.error('Error parsing final buffer:', error, 'Buffer:', buffer);
                             }
+                        }
+                        break;
+                    }
+                    
+                    buffer += decoder.decode(value, { stream: true });
+                    
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop() || '';
+                    
+                    console.log(`Processing ${lines.length} lines from stream`);
+                    
+                    for (const line of lines) {
+                        try {
+                            const data = JSON.parse(line);
+                            console.log('Message type:', data.type);
+                            
+                            switch (data.type) {
+                                case 'start':
+                                    progressText.textContent = `Processing 0/${data.total_urls} URLs...`;
+                                    break;
+                                
+                                case 'progress':
+                                    progressBar.style.width = `${data.percent}%`;
+                                    progressText.textContent = `Processing ${data.processed}/${data.total} URLs...`;
+                                    break;
+                                
+                                case 'error':
+                                    throw new Error(data.error);
+                            }
+                        } catch (error) {
+                            console.error('Error parsing response:', error, 'Line:', line);
+                            progressText.textContent = `Error: ${error.message}`;
+                            showAlert(error.message, 'danger');
                         }
                     }
                 }
-
-                await processUrls(null);
             } catch (error) {
                 console.error('Error:', error);
                 progressText.textContent = `Error: ${error.message}`;
